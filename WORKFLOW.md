@@ -264,7 +264,7 @@ Controller (validates request, calls service)
 Service (business logic, calls storage)
     │
     ▼
-Storage (in-memory list, will be PostgreSQL later)
+Storage (PostgreSQL database, port 5433)
     │
     ▼
 Response (JSON data)
@@ -309,6 +309,9 @@ User (sees the result)
 sri mart/
 ├── sri.cpp                     → Server startup and route registration
 ├── CMakeLists.txt              → Build instructions for the compiler
+├── start.bat                   → Quick start (PostgreSQL + server)
+├── dev.bat                     → Dev mode (rebuild + run)
+├── stop.bat                    → Stop PostgreSQL
 │
 ├── controllers/                → "Front desk" - receives HTTP requests
 │   ├── ProductController.h     → Product route declarations
@@ -318,7 +321,7 @@ sri mart/
 │
 ├── services/                   → "Manager" - business logic
 │   ├── ProductService.h        → Product operations declarations
-│   ├── ProductService.cc       → Product operations implementations
+│   ├── ProductService.cc       → Product operations implementations (PostgreSQL via libpq)
 │   ├── AuthService.h           → Auth operations declarations
 │   └── AuthService.cc          → Auth operations implementations
 │
@@ -330,6 +333,9 @@ sri mart/
 │   ├── drogon.json             → Server and database settings
 │   └── login.html              → Login/Register web page
 │
+├── postgresql/                 → Portable PostgreSQL binaries
+│   └── pgsql/bin/              → pg_ctl, psql, etc.
+│
 └── build/                      → Compiled executable
     └── sri_mart.exe            → The running server
 ```
@@ -338,23 +344,26 @@ sri mart/
 
 ## How to Run
 
-1. Start PostgreSQL (if available):
-   ```
-   C:\pgsql_data\bin\pg_ctl.exe -D C:\pgsql_data start
-   ```
+### Option 1: Double-click batch file (easiest)
+Just double-click `start.bat` or `dev.bat` in the project folder.
 
-2. Start the server:
-   ```
-   cd "sri mart\build"
-   sri_mart.exe
-   ```
+### Option 2: CMD commands
+```cmd
+:: Start PostgreSQL
+"C:\Users\Srinivasan\Downloads\sri projects\sri mart\postgresql\pgsql\bin\pg_ctl.exe" -D C:\pgsql_data -l C:\pgsql.log start
 
-3. Open browser:
-   ```
-   http://localhost:8080
-   ```
+:: Set MSYS2 compiler in PATH
+set PATH=C:\Users\Srinivasan\MSYS2\ucrt64\bin;%PATH%
 
-4. You'll see the login page
+:: Run server
+cd "C:\Users\Srinivasan\Downloads\sri projects\sri mart\build"
+sri_mart.exe
+```
+
+### Open in browser:
+```
+http://localhost:8080
+```
 
 ---
 

@@ -16,6 +16,21 @@ This folder contains detailed explanations of how every part of Sri Mart works.
 2. Then read `02-login-flow.md` — understand how users login
 3. Finally read `03-complete-workflow.md` — understand the complete system
 
+## Quick Start
+
+Double-click `start.bat` or `dev.bat` in the project folder to start everything.
+
+### Or use CMD:
+```cmd
+:: Start PostgreSQL
+"C:\Users\Srinivasan\Downloads\sri projects\sri mart\postgresql\pgsql\bin\pg_ctl.exe" -D C:\pgsql_data -l C:\pgsql.log start
+
+:: Set PATH and run
+set PATH=C:\Users\Srinivasan\MSYS2\ucrt64\bin;%PATH%
+cd "C:\Users\Srinivasan\Downloads\sri projects\sri mart\build"
+sri_mart.exe
+```
+
 ## Default Accounts
 
 | Username | Password | Role |

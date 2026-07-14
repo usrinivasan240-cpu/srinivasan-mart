@@ -8,6 +8,11 @@ This file shows how all parts of Sri Mart work together, from server startup to 
 
 ### What happens when you run `sri_mart.exe`:
 
+**Prerequisites:**
+1. Start PostgreSQL: `pg_ctl.exe -D C:\pgsql_data start`
+2. Set PATH: `set PATH=C:\Users\Srinivasan\MSYS2\ucrt64\bin;%PATH%`
+3. Or just double-click `start.bat`
+
 ```cpp
 // sri.cpp - The entry point
 int main()
@@ -94,14 +99,20 @@ int main()
                       │
                       ▼
 ┌─────────────────────────────────────────────────────────┐
-│                   STORAGE (PostgreSQL)                    │
-│  (The "filing cabinet" - where data lives permanently)   │
+│                   STORAGE                                  │
 │                                                          │
-│  Database: sri_mart (port 5433)                          │
-│  Tables:                                                  │
-│  - products (id, name, description, price, stock, ...)   │
-│  - Users stored in-memory (AuthService)                  │
-│  - Tokens stored in-memory (AuthService)                 │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │  PostgreSQL (port 5433)                             │ │
+│  │  Database: sri_mart                                 │ │
+│  │  Tables:                                            │ │
+│  │  - products (id, name, description, price, stock)   │ │
+│  └─────────────────────────────────────────────────────┘ │
+│                                                          │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │  In-Memory Storage (AuthService)                    │ │
+│  │  - Users (will be moved to PostgreSQL later)        │ │
+│  │  - Tokens (session management)                      │ │
+│  └─────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -492,6 +503,9 @@ Compare:   "x@y#z$w%v&" != "1!2#3$4%5&" ✗ NO MATCH!
 ```
 sri.cpp                    → Server entry point, route registration
 CMakeLists.txt             → Build instructions
+start.bat                  → Quick start (PostgreSQL + server)
+dev.bat                    → Dev mode (rebuild + run)
+stop.bat                   → Stop PostgreSQL
 ```
 
 ### Controllers
@@ -525,6 +539,17 @@ config/login.html   → Login/Register web page
 ### Database
 ```
 PostgreSQL (port 5433) → sri_mart database → products table
+Location: C:\pgsql_data
+Binaries: postgresql\pgsql\bin\
+```
+
+### Verify PostgreSQL
+```cmd
+:: Check if PostgreSQL is running
+"C:\Users\Srinivasan\Downloads\sri projects\sri mart\postgresql\pgsql\bin\psql.exe" -U postgres -h localhost -p 5433 -d sri_mart -c "\dt"
+
+:: View all products
+"C:\Users\Srinivasan\Downloads\sri projects\sri mart\postgresql\pgsql\bin\psql.exe" -U postgres -h localhost -p 5433 -d sri_mart -c "SELECT * FROM products;"
 ```
 
 ### Documentation
@@ -542,35 +567,28 @@ steps/03-complete-workflow.md  → This file
 ## Part 11: How to Test Everything
 
 ### Test Registration:
-```bash
-curl -X POST http://localhost:8080/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"username":"test","email":"test@test.com","password":"test123"}'
+```cmd
+curl -X POST http://localhost:8080/api/v1/auth/register -H "Content-Type: application/json" -d "{\"username\":\"test\",\"email\":\"test@test.com\",\"password\":\"test123\"}"
 ```
 
 ### Test Login:
-```bash
-curl -X POST http://localhost:8080/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}'
+```cmd
+curl -X POST http://localhost:8080/api/v1/auth/login -H "Content-Type: application/json" -d "{\"username\":\"admin\",\"password\":\"admin123\"}"
 ```
 
 ### Test Validate Token:
-```bash
-curl -X GET http://localhost:8080/api/v1/auth/validate \
-  -H "Authorization: Bearer YOUR_TOKEN_HERE"
+```cmd
+curl -X GET http://localhost:8080/api/v1/auth/validate -H "Authorization: Bearer YOUR_TOKEN_HERE"
 ```
 
 ### Test Get Products:
-```bash
+```cmd
 curl -X GET http://localhost:8080/api/v1/products
 ```
 
 ### Test Create Product:
-```bash
-curl -X POST http://localhost:8080/api/v1/products \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Phone","price":699.99,"stock":25}'
+```cmd
+curl -X POST http://localhost:8080/api/v1/products -H "Content-Type: application/json" -d "{\"name\":\"Phone\",\"price\":699.99,\"stock\":25}"
 ```
 
 ---

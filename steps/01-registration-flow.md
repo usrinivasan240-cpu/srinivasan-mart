@@ -488,11 +488,16 @@ You see the message: **"Registration successful! Please login."**
 
 ## Data Storage Location
 
-The user is stored in this variable (in AuthService.cc):
+**Products** are stored in PostgreSQL database (port 5433, database: `sri_mart`).
+Products persist permanently even if the server restarts.
 
+**Users** are stored in-memory (AuthService):
 ```cpp
 static std::vector<User> products;  // This is the in-memory storage
 ```
+When the server stops, user data is cleared. (Will be moved to PostgreSQL later.)
 
-This is like a list in memory. When the server stops, this list is emptied.
-**To make data permanent, we need PostgreSQL.**
+**To verify products in PostgreSQL:**
+```cmd
+"C:\Users\Srinivasan\Downloads\sri projects\sri mart\postgresql\pgsql\bin\psql.exe" -U postgres -h localhost -p 5433 -d sri_mart -c "SELECT * FROM products;"
+```
