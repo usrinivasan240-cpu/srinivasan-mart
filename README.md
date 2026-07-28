@@ -1,52 +1,106 @@
-# Sri Mart — Project Documentation
+# Srinivasan Mart — E-Commerce Backend API
 
-## Purpose
-Sri Mart is being developed as a C++20 backend/API project. The documentation is intentionally written so a non-coder can understand what each part does.
+A C++20 backend API for an e-commerce store, built with Drogon and PostgreSQL. Handles user authentication and product management with a clean layered architecture.
 
-## Fixed Technology Stack
-- C++20
-- Drogon
-- PostgreSQL (Drogon has built-in ORM support)
-- CMake
-- vcpkg
-- MSYS2 UCRT64 / MinGW
-- JSON through the JSON support already provided by Drogon/JsonCpp
-- Git/GitHub for source control
+## Tech Stack
 
-**Rule:** Do not introduce another technology stack. New libraries/frameworks/tools are not part of this plan.
+- **Language:** C++20
+- **Framework:** Drogon (HTTP server + JSON)
+- **Database:** PostgreSQL (via libpq, port 5433)
+- **Build:** CMake + vcpkg + MSYS2 UCRT64 / MinGW
+- **Frontend:** Static HTML login page served at `/`
 
-## Current Project Structure
+## Features
+
+- User registration, login with token auth, token validation
+- Product CRUD (create, list, get by id, update, delete) persisted in PostgreSQL
+- Health check and hello test endpoints
+- Login/Register web UI with token storage in localStorage
+
+## Project Structure
+
 ```text
-sri mart/
-├── sri.cpp
-├── CMakeLists.txt
-├── controllers/
-│   └── ProductController.h
-├── models/
-├── services/
+srinivasan-mart/
+├── sri.cpp                  # App entry point, route registration, port 8080
+├── CMakeLists.txt           # Build config, target sri_mart
+├── controllers/             # HTTP layer: AuthController, ProductController
+├── services/                # Business logic: AuthService, ProductService
+├── models/                  # Data structs: User, Product
 ├── config/
-└── build-mingw/
+│   ├── drogon.json          # Listener + log config
+│   └── login.html           # Login/Register UI
+├── start.bat / dev.bat / stop.bat
+└── ARCHITECTURE.md
 ```
 
-## Current Known API
-- `GET /api/v1/health` → checks whether the API is running.
-- `GET /api/v1/hello` → simple Sri Mart test response.
-- `GET /api/v1/products` → current ProductController test endpoint.
+Architecture flow: `Client -> Drogon routes -> Controller -> Service -> Model/DB -> JSON response`
 
-## Current Build Target
-Executable: `sri_mart`
-Port: `8080`
+## API Endpoints
 
-## Documentation Rule
-Every source module must begin with a plain-English comment explaining:
-1. What this file is.
-2. Why it exists.
-3. What the main class/function does.
-4. What another module can expect from it.
+### Health & UI
+| Method | URL | Purpose |
+|--------|-----|---------|
+| GET | `/` | Login page (HTML) |
+| GET | `/api/v1/health` | `{"status":"UP"}` |
+| GET | `/api/v1/hello` | `{"message":"Welcome to Sri Mart API"}` |
 
-Example:
-```cpp
-// PURPOSE: This controller receives product-related HTTP requests.
-// It converts the request into application work and sends a JSON response.
-// A non-coder can think of this file as the "front desk" for product requests.
+### Auth
+| Method | URL | Purpose |
+|--------|-----|---------|
+| POST | `/api/v1/auth/register` | `{username,email,password}` -> 201 user |
+| POST | `/api/v1/auth/login` | `{username,password}` -> `{token,user}` |
+| GET | `/api/v1/auth/validate` | `Authorization: Bearer <token>` -> user |
+| GET | `/api/v1/auth/users` | List users (no passwords) |
+
+### Products
+| Method | URL | Purpose |
+|--------|-----|---------|
+| GET | `/api/v1/products` | List all |
+| POST | `/api/v1/products` | `{name,price,description?,stock?}` |
+| GET | `/api/v1/products/{id}` | Get one |
+| PUT | `/api/v1/products/{id}` | Update |
+| DELETE | `/api/v1/products/{id}` | Delete |
+
+## Getting Started
+
+### Prerequisites
+- MSYS2 UCRT64 (MinGW), CMake, vcpkg with Drogon installed
+- PostgreSQL running with database `sri_mart` (default expects `localhost:5433`, user `postgres`)
+
+### Build
+```cmd
+cmake -B build -S . -G "MinGW Makefiles" -DCMAKE_TOOLCHAIN_FILE="C:/dev/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-mingw-dynamic
+cmake --build build
 ```
+
+### Run
+```cmd
+cd build
+sri_mart.exe
+```
+Open `http://localhost:8080`
+
+You should see:
+```
+Connected to PostgreSQL database: sri_mart
+Products table created/verified in PostgreSQL.
+Sri Mart API running on http://0.0.0.0:8080
+```
+
+Or use `start.bat` / `dev.bat` for quick start, `stop.bat` to stop PostgreSQL.
+
+### Test with cURL
+```cmd
+curl http://localhost:8080/api/v1/health
+curl -X POST http://localhost:8080/api/v1/auth/register -H "Content-Type: application/json" -d "{\"username\":\"test\",\"email\":\"test@test.com\",\"password\":\"test123\"}"
+curl -X POST http://localhost:8080/api/v1/auth/login -H "Content-Type: application/json" -d "{\"username\":\"admin\",\"password\":\"admin123\"}"
+curl http://localhost:8080/api/v1/products
+curl -X POST http://localhost:8080/api/v1/products -H "Content-Type: application/json" -d "{\"name\":\"Phone\",\"price\":699.99,\"stock\":25}"
+```
+
+Default accounts: `admin / admin123 (admin)`, `customer / customer123 (customer)`
+
+## Notes
+- Products are persisted in PostgreSQL `products` table (auto-created on startup).
+- Auth storage is currently in-memory; moving to PostgreSQL + hashed passwords with bcrypt is planned.
+- See `ARCHITECTURE.md` for layer details and `config/drogon.json` for port/log config.
