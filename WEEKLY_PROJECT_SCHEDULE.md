@@ -22,3 +22,6 @@ Implemented in this repo (master):
 - `GET /api/v1/products`, `POST /api/v1/products`, `GET /api/v1/products/{id}`, `PUT /api/v1/products/{id}`, `DELETE /api/v1/products/{id}`
 - `GET /api/v1/health`, `GET /api/v1/hello`, `GET /` login page
 - PostgreSQL persistence for products, in-memory auth (see README Notes)
+
+<!-- Week7 checkpoint: security review -->
+
