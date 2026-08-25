@@ -25,3 +25,5 @@ Implemented in this repo (master):
 
 <!-- Week7 checkpoint: security review -->
 
+<!-- Week8 checkpoint: deployment prep -->
+
