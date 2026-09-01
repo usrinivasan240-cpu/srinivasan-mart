@@ -303,3 +303,30 @@ bool ProductService::deleteProduct(const std::string &id)
     freeResult(res);
     return deleted;
 }
+
+// Searches products by case-sensitive name substring + price range.
+// Stub: loads all then filters in RAM (Week 5). Planned: SQL WHERE ILIKE.
+Json::Value ProductService::searchProducts(const std::string &query, double minPrice, double maxPrice)
+{
+    Json::Value all = getAllProducts();
+    Json::Value result(Json::arrayValue);
+    for (auto &item : all)
+    {
+        std::string name = item.get("name", "").asString();
+        double price = item.get("price", 0.0).asDouble();
+        if (!query.empty() && name.find(query) == std::string::npos)
+        {
+            continue;
+        }
+        if (minPrice >= 0 && price < minPrice)
+        {
+            continue;
+        }
+        if (maxPrice >= 0 && price > maxPrice)
+        {
+            continue;
+        }
+        result.append(item);
+    }
+    return result;
+}

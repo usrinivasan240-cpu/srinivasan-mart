@@ -34,6 +34,11 @@ void AuthController::initRoutes()
     app().registerHandler("/api/v1/auth/users",
         &AuthController::getUsers,
         {Get});
+
+    // POST /api/v1/auth/logout -> logs out a Bearer token
+    app().registerHandler("/api/v1/auth/logout",
+        &AuthController::logoutUser,
+        {Post});
 }
 
 // Registers a new user account.
@@ -143,4 +148,37 @@ void AuthController::getUsers(
     auto users = AuthService::getAllUsers();
     auto resp = HttpResponse::newHttpJsonResponse(users);
     callback(resp);
+}
+
+// Logs out a Bearer token. Client should also clear localStorage.
+void AuthController::logoutUser(
+    const HttpRequestPtr &req,
+    std::function<void(const HttpResponsePtr &)> &&callback)
+{
+    std::string authHeader = req->getHeader("Authorization");
+    if (authHeader.empty() || authHeader.find("Bearer ") != 0)
+    {
+        Json::Value error;
+        error["error"] = "Authorization header with Bearer token required";
+        auto resp = HttpResponse::newHttpJsonResponse(error);
+        resp->setStatusCode(k401Unauthorized);
+        callback(resp);
+        return;
+    }
+    std::string token = authHeader.substr(7);
+    if (AuthService::logoutToken(token))
+    {
+        Json::Value ok;
+        ok["message"] = "Logged out successfully";
+        auto resp = HttpResponse::newHttpJsonResponse(ok);
+        callback(resp);
+    }
+    else
+    {
+        Json::Value error;
+        error["error"] = "Invalid or expired token";
+        auto resp = HttpResponse::newHttpJsonResponse(error);
+        resp->setStatusCode(k401Unauthorized);
+        callback(resp);
+    }
 }

@@ -39,6 +39,10 @@ public:
                               std::function<void(const drogon::HttpResponsePtr &)> &&callback,
                               std::string productId);
 
+    // Searches products by ?q=&minPrice=&maxPrice= (Week 5).
+    static void searchProducts(const drogon::HttpRequestPtr &req,
+                               std::function<void(const drogon::HttpResponsePtr &)> &&callback);
+
     // Registers all product routes with the server.
     static void initRoutes();
 };

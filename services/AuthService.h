@@ -35,6 +35,12 @@ public:
     // Finds a user by ID.
     static Json::Value getUserById(const std::string &id);
 
+    // Logs out a token. Returns true if token existed.
+    static bool logoutToken(const std::string &token);
+
+    // Returns user_id for a token, or empty string if invalid.
+    static std::string getUserIdFromToken(const std::string &token);
+
 private:
     // Generates a unique ID (UUID).
     static std::string generateUUID();

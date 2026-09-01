@@ -10,6 +10,11 @@
 #include <drogon/drogon.h>
 #include "controllers/ProductController.h"
 #include "controllers/AuthController.h"
+#include "controllers/CartController.h"
+#include "controllers/OrderController.h"
+#include "controllers/ReviewController.h"
+#include "controllers/AdminController.h"
+#include "controllers/ChatController.h"
 #include "services/ProductService.h"
 #include <fstream>
 #include <sstream>
@@ -71,11 +76,18 @@ int main()
         },
         {drogon::Get});
 
-    // Register all product-related routes (GET, POST, PUT, DELETE).
+    // Register all product-related routes (GET, POST, PUT, DELETE, search).
     ProductController::initRoutes();
 
-    // Register all authentication routes (login, register, validate).
+    // Register all authentication routes (login, register, validate, logout).
     AuthController::initRoutes();
+
+    // Register Week 2-11 stubs: cart, orders, reviews, seller/admin, chatbot.
+    CartController::initRoutes();
+    OrderController::initRoutes();
+    ReviewController::initRoutes();
+    AdminController::initRoutes();
+    ChatController::initRoutes();
 
     // Initialize the PostgreSQL database table for products.
     ProductService::initializeDatabase();

@@ -35,6 +35,9 @@ public:
     // Deletes a product by ID. Returns true if deleted, false if not found.
     static bool deleteProduct(const std::string &id);
 
+    // Searches products by name substring + price range (Week 5 stub, in-RAM filter).
+    static Json::Value searchProducts(const std::string &query, double minPrice, double maxPrice);
+
 private:
     // The PostgreSQL database connection.
     static PGconn *getConnection();

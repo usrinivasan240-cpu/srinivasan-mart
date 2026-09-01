@@ -32,6 +32,10 @@ public:
     static void getUsers(const drogon::HttpRequestPtr &req,
                          std::function<void(const drogon::HttpResponsePtr &)> &&callback);
 
+    // Logs out a token.
+    static void logoutUser(const drogon::HttpRequestPtr &req,
+                           std::function<void(const drogon::HttpResponsePtr &)> &&callback);
+
     // Registers all auth routes with the server.
     static void initRoutes();
 };

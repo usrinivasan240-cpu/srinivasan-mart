@@ -19,8 +19,16 @@ add_executable(sri_mart
     sri.cpp
     controllers/ProductController.cc
     controllers/AuthController.cc
+    controllers/CartController.cc
+    controllers/OrderController.cc
+    controllers/ReviewController.cc
+    controllers/AdminController.cc
+    controllers/ChatController.cc
     services/ProductService.cc
     services/AuthService.cc
+    services/CartService.cc
+    services/OrderService.cc
+    services/ReviewService.cc
 )
 
 target_link_libraries(sri_mart PRIVATE

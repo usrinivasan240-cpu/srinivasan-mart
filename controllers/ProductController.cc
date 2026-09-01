@@ -40,6 +40,11 @@ void ProductController::initRoutes()
     app().registerHandler("/api/v1/products/{id}",
         &ProductController::deleteProduct,
         {Delete});
+
+    // GET /api/v1/products/search?q=&minPrice=&maxPrice= -> search/filter
+    app().registerHandler("/api/v1/products/search",
+        &ProductController::searchProducts,
+        {Get});
 }
 
 // Fetches all products from the service and returns them as JSON.
@@ -151,4 +156,19 @@ void ProductController::deleteProduct(
         resp->setStatusCode(k404NotFound);
         callback(resp);
     }
+}
+
+// Searches products by query params: q, minPrice, maxPrice.
+void ProductController::searchProducts(
+    const HttpRequestPtr &req,
+    std::function<void(const HttpResponsePtr &)> &&callback)
+{
+    std::string q = req->getParameter("q");
+    std::string minS = req->getParameter("minPrice");
+    std::string maxS = req->getParameter("maxPrice");
+    double minPrice = minS.empty() ? -1 : std::stod(minS);
+    double maxPrice = maxS.empty() ? -1 : std::stod(maxS);
+    auto result = ProductService::searchProducts(q, minPrice, maxPrice);
+    auto resp = HttpResponse::newHttpJsonResponse(result);
+    callback(resp);
 }

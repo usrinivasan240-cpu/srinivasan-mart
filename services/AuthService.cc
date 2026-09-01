@@ -239,3 +239,30 @@ Json::Value AuthService::getUserById(const std::string &id)
     error["error"] = "User not found";
     return error;
 }
+
+// Logs out a token by erasing it from token storage.
+bool AuthService::logoutToken(const std::string &token)
+{
+    std::lock_guard<std::mutex> lock(getMutex());
+    auto &tokens = getTokenStorage();
+    auto it = tokens.find(token);
+    if (it != tokens.end())
+    {
+        tokens.erase(it);
+        return true;
+    }
+    return false;
+}
+
+// Returns user_id for a token, or empty string if invalid.
+std::string AuthService::getUserIdFromToken(const std::string &token)
+{
+    std::lock_guard<std::mutex> lock(getMutex());
+    auto &tokens = getTokenStorage();
+    auto it = tokens.find(token);
+    if (it != tokens.end())
+    {
+        return it->second;
+    }
+    return "";
+}
