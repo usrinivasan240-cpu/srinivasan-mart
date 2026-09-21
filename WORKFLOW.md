@@ -1,412 +1,249 @@
-# Srinivasan Mart — Full Frontend ↔ Backend Workflow (Exact Code)
+# Srinivasan Mart — OVERALL WORKFLOW (All Things, One File)
 
-> How a click on the frontend travels to the backend, how data is passed, verified, stored, and how the next page/frontend changes. Every step shows `file:line` + exact code + explanation.
-> Stack: `login.html` (frontend) → Drogon routes → `controllers/*` → `services/*` → `models/*` → PostgreSQL (products) or in-memory (auth/cart/orders).
-
-## 0. Architecture — How Frontend and Backend Are Connected
-
-```
-[Browser: login.html] --fetch JSON--> [Drogon HTTP server: sri.cpp] --route--> [Controller] --calls--> [Service] --uses--> [Model/DB] --JSON--> [Browser]
-```
-- `sri.cpp:25` opens port 8080, `config/drogon.json:4-5` same port.
-- `sri.cpp:80-90` wires every URL to a controller function.
-- Frontend uses `fetch(API_BASE + '/api/v1/...')` with `Content-Type: application/json` and `Authorization: Bearer <token>`.
-- Backend always returns `HttpResponse::newHttpJsonResponse(json)` with status 200/201/400/401/404.
+> One document that shows how **everything** connects — frontend ↔ backend ↔ database — for **all 11 weeks + Final Review Sep 21**.
+> Format: `file:line` = open that file, go to that line. Every flow shows **exact code** with explanation.
+> Stack: C++20 + Drogon + libpq PostgreSQL (`localhost:5433/sri_mart`) + static `login.html`.
 
 ---
 
-## 1. LOGIN — Full Click-to-Verify-to-Next-Page Workflow
+## 0. OVERALL SYSTEM FLOW — How All Things Connect
 
-### Step 1: User types and clicks Login
-
-**File `config/login.html:42-52`**
-```html
-<!-- Login Form -->
-<div id="loginForm" class="form active">
-  <div class="form-group">
-    <label>Username</label>
-    <input type="text" id="loginUsername" placeholder="Enter username">
-  </div>
-  <div class="form-group">
-    <label>Password</label>
-    <input type="password" id="loginPassword" placeholder="Enter password">
-  </div>
-  <button onclick="login()">Login</button>  <!-- CLICK TRIGGERS login() -->
-</div>
 ```
-- User enters `admin` / `admin123` and clicks **Login** → browser calls JS `login()`.
-
-### Step 2: Frontend passes data to backend via `fetch`
-
-**File `config/login.html:105-119` — exact code**
-```js
-async function login() {
-  const username = document.getElementById('loginUsername').value; // 106
-  const password = document.getElementById('loginPassword').value; // 107
-  if (!username || !password) { // 109
-    showMessage('Please fill in all fields', 'error'); return;
-  }
-  try {
-    const response = await fetch(API_BASE + '/api/v1/auth/login', { // 115
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, // tells backend: JSON body
-      body: JSON.stringify({ username, password }) // 118 — data passed as JSON string
-    });
-    const data = await response.json(); // 120 — backend reply
+                                    ┌──────────────┐
+                                    │   Browser    │
+                                    │ login.html   │  fetch() JSON, localStorage token
+                                    └──────┬───────┘
+                                           │ HTTP POST/GET/PUT/DELETE + Authorization: Bearer <token>
+                                           ▼
+┌────────────┐  sri.cpp:25          ┌─────────────────┐  *.cc: initRoutes()   ┌──────────────┐  call   ┌──────────────┐  SQL/RTN  ┌──────────┐
+│  Drogon    │◄──listen 0.0.0.0:8080─┤  Controllers    ├──────────────────────►│   Services   ├────────►│   Models     │────────►│PostgreSQL│
+│  Server    │                      │ (front desk)    │                      │ (business)   │         │ (structs)    │         │ or RAM   │
+└────────────┘                      └─────────────────┘                      └──────────────┘         └──────────────┘         └──────────┘
+         ▲                                 │                                      │                         │                     │
+         └─────────────────────────────────┴────────── JSON response ──────────────┴──── newHttpJsonResponse ┴──── toJson() ─────┘
+                                    Browser JS: response.json() → localStorage/DOM → next page (window.location.href)
 ```
-- `API_BASE = 'http://localhost:8080'` at `77`
-- `JSON.stringify({username,password})` converts `{username:"admin", password:"admin123"}` to `'{"username":"admin","password":"admin123"}'` and sends in HTTP body.
-- Headers `Content-Type: application/json` lets Drogon parse it via `getJsonObject()`.
 
-### Step 3: Backend route receives request
+**Rule every feature follows:** `Route → Controller → Service → Model/DB → JSON → Frontend change`
 
-**File `sri.cpp:83` + `controllers/AuthController.cc:24-26`**
-```cpp
-// sri.cpp:83
-AuthController::initRoutes();
-// AuthController.cc:24-26
-app().registerHandler("/api/v1/auth/login", &AuthController::loginUser, {Post});
+**App boot `sri.cpp:1-101`**
+- `10-18` includes all controllers + `ProductService.h`
+- `25` `app().addListener("0.0.0.0",8080)` — same as `config/drogon.json:4-5`
+- `28-51` `GET /health` → `{"status":"UP"}`, `GET /hello` → welcome
+- `54-77` `GET /` serves `config/login.html:1-174` else JSON
+- `80` `ProductController::initRoutes()`, `83` `AuthController::initRoutes()`, `86-90` `CartController`, `OrderController`, `ReviewController`, `AdminController`, `ChatController`
+- `93` `ProductService::initializeDatabase()` → creates `products` table
+- `96-98` `app().run()` blocks
+
+**Build `CMakeLists.txt:1-50`**
+- `18-32` `add_executable(sri_mart sri.cpp controllers/*.cc services/*.cc)` → `target_link_libraries Drogon::Drogon pq`
+
+**Folder map**
 ```
-- Drogon matches `POST /api/v1/auth/login` → calls `AuthController::loginUser`.
-
-### Step 4: Controller extracts and validates JSON
-
-**File `controllers/AuthController.cc:79-109`**
-```cpp
-void AuthController::loginUser(const HttpRequestPtr &req, ...) { // 79
-  auto json = req->getJsonObject(); // 83 — parses body JSON
-  if (!json || !json->isMember("username") || !json->isMember("password")) { // 84
-    // 400 Username and password are required
-  }
-  std::string username = (*json)["username"].asString(); // 94
-  std::string password = (*json)["password"].asString(); // 95
-  auto result = AuthService::loginUser(username, password); // 97 — call service
-  if (result.isMember("error")) { // 98
-    resp->setStatusCode(k401Unauthorized); // wrong credentials
-  } else {
-    auto resp = HttpResponse::newHttpJsonResponse(result); // 101 — {token, user}
-    callback(resp);
-  }
-}
+sri.cpp, CMakeLists.txt
+config/drogon.json (14L), login.html (174L)
+controllers/Auth(41/184L), Product(48/174L), Cart(26/135L), Order(28/127L), Review(19/52L), Admin(23/71L), Chat(19/37L)
+services/Auth(62/268L), Product(50/332L), Cart(39/101L), Order(38/122L), Review(28/68L)
+models/User(64L), Product(66L), CartItem(33L), Order(38L), Review(35L)
 ```
-- Controller does **no DB logic**, only request handling.
-
-### Step 5: Service verifies email/username + password (how verification works)
-
-**File `services/AuthService.cc:165-189`**
-```cpp
-Json::Value AuthService::loginUser(const std::string &username, const std::string &password) { // 165
-  std::lock_guard<std::mutex> lock(getMutex()); // 167 thread-safe
-  std::string hashedPassword = hashPassword(password); // 169 — hash input
-  for (auto &user : getUserStorage()) { // 171 — loop in-memory users
-    if (user.username == username && user.password == hashedPassword) { // 173 — VERIFY
-      std::string token = generateToken(); // 176 — 32 hex chars, 52-64
-      getTokenStorage()[token] = user.id; // 177 — store token→userId
-      Json::Value result;
-      result["token"] = token; // 180
-      result["user"] = user.toJson(); // 181 — excludes password, User.h:31-41
-      return result;
-    }
-  }
-  Json::Value error; error["error"] = "Invalid username or password"; return error; // 186
-}
-```
-**How password is hashed — `services/AuthService.cc:41-49`**
-```cpp
-std::string AuthService::hashPassword(const std::string &password) {
-  std::string hashed = password;
-  for (auto &c : hashed) c = c ^ 0x5A; // XOR each char with 0x5A (demo only, planned bcrypt)
-  return hashed;
-}
-```
-**Where users are stored — `services/AuthService.cc:68-96`**
-```cpp
-std::vector<User> &AuthService::getUserStorage() {
-  static std::vector<User> users;
-  if (users.empty()) {
-    User admin; admin.id = generateUUID(); admin.username="admin";
-    admin.email="admin@srimart.com"; admin.password=hashPassword("admin123"); admin.role="admin";
-    users.push_back(admin); // seeded on first call
-  }
-  return users;
-}
-```
-- Verification is **username + hashed password equality** against in-memory `vector<User>`. On success, a random token is generated and mapped in `map<string,string> tokens` at `services/AuthService.cc:99-103`.
-
-### Step 6: Backend sends JSON back, frontend changes page
-
-**Backend returns** `{ "token": "a3f9...", "user": { "id": "...", "username":"admin", "email":"admin@srimart.com", "role":"admin" } }` with 200.
-
-**Frontend `config/login.html:122-133` handles reply and does next-page/frontend change:**
-```js
-if (response.ok) { // 122
-  showMessage('Login successful! Welcome ' + data.user.username, 'success'); // 123
-  document.getElementById('tokenBox').textContent = 'Token: ' + data.token; // 124
-  document.getElementById('tokenBox').style.display = 'block'; // 125
-  localStorage.setItem('token', data.token); // 126 — SAVE token for next requests
-  localStorage.setItem('user', JSON.stringify(data.user)); // 127 — SAVE user
-  // NEXT PAGE LOGIC: In this app, login.html stays but shows token. For a multi-page app you would do:
-  // window.location.href = '/products.html';  // or '/dashboard.html'
-  // That new page would then do: fetch('/api/v1/products', {headers: {'Authorization':'Bearer '+localStorage.getItem('token')}})
-} else {
-  showMessage(data.error || 'Login failed', 'error'); // 129
-}
-```
-- `localStorage` keeps login across page reloads. The “next page open” is **frontend-driven**: after storing token, JS can `window.location.href = '/dashboard.html'` or show hidden sections. In this demo the token box appears and you would manually navigate to product APIs. For a full app, the product page would read `localStorage.getItem('token')` and send it as `Authorization: Bearer <token>`.
 
 ---
 
-## 2. LOGOUT — How Frontend Clears and Backend Invalidates
+## 1. DATABASE — Connected for All Things
 
-### Frontend click (add this button to any authenticated page)
-```html
-<button onclick="logout()">Logout</button>
-<script>
-async function logout(){
-  const token = localStorage.getItem('token');
-  await fetch('http://localhost:8080/api/v1/auth/logout', {
-    method:'POST',
-    headers:{'Authorization':'Bearer '+token} // pass token to backend
-  });
-  localStorage.removeItem('token'); // frontend change
-  localStorage.removeItem('user');
-  window.location.href = '/'; // back to login page — frontend navigation
-  // or showForm('login');
-}
-</script>
-```
-
-### Backend `controllers/AuthController.cc:38-41,154-184`
+**Postgres (products) `services/ProductService.cc:15-106`**
 ```cpp
-// 38-41 route
-app().registerHandler("/api/v1/auth/logout", &AuthController::logoutUser, {Post});
-// 154-184 handler
-void AuthController::logoutUser(...) {
-  std::string authHeader = req->getHeader("Authorization"); // 158
-  if (authHeader.find("Bearer ") != 0) return 401;
-  std::string token = authHeader.substr(7); // 168
-  if (AuthService::logoutToken(token)) { // 169
-    ok["message"]="Logged out successfully";
+// 16 global connection
+static PGconn *g_conn = nullptr;
+// 20-41 getConnection()
+PGconn *ProductService::getConnection(){
+  if(g_conn==nullptr || PQstatus(g_conn)!=CONNECTION_OK){
+    if(g_conn) PQfinish(g_conn);
+    g_conn = PQconnectdb("host=localhost port=5433 dbname=sri_mart user=postgres password=postgres"); // 29
+    // LOG_INFO Connected to sri_mart else LOG_ERROR
   }
+  return g_conn;
 }
+// 43-50 freeResult() → PQclear
+// 76-106 initializeDatabase() called from sri.cpp:93
+const char *query = "CREATE TABLE IF NOT EXISTS products ("
+  "id VARCHAR(36) PRIMARY KEY," "name VARCHAR(255) NOT NULL,"
+  "description TEXT DEFAULT ''," "price DECIMAL(10,2) NOT NULL,"
+  "stock INTEGER DEFAULT 0," "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+  "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP" ")";
+PGresult *res = PQexec(conn, query); // 95
 ```
-**Service `services/AuthService.cc:243-267`**
-```cpp
-bool AuthService::logoutToken(const std::string &token){
-  auto &tokens = getTokenStorage();
-  auto it = tokens.find(token);
-  if (it != tokens.end()){ tokens.erase(it); return true; }
-  return false;
-}
-```
-- Backend **erases token** from in-memory map, so `validateToken` will fail afterwards. Frontend **clears storage + redirects**.
+- SQL ops: List `118:SELECT ... FROM products` → loop `PQgetvalue` `132-143`, Get one `160:SELECT ... WHERE id=$1` via `PQexecParams`, Create `216:INSERT ... VALUES($1..$5)`, Update `264:UPDATE ... WHERE id=$5`, Delete `291:DELETE WHERE id=$1`, Search `309:getAllProducts()` + RAM filter `317:find(q)`.
+- **In-memory (auth/cart/orders/reviews)** — `AuthService.cc:68-110` `vector<User> users` seeded admin/customer + `map<token,userId> tokens` + mutex; `CartService.cc:5-14` `map<userId,vector<CartItem>>`; `OrderService.cc:5-14` `vector<Order>`; `ReviewService.cc:5-14` `vector<Review>` — planned Postgres migration (bcrypt, `users`/`cart_items`/`orders`/`reviews` tables).
 
 ---
 
-## 3. REGISTER — Similar to Login but Creates User
+## 2. WEEK 1 — Authentication + Project Foundation (Jul 6-12)
 
-**Frontend `config/login.html:136-163`**
+### 2.1 Register — Frontend → Backend → Store
+**Click** `login.html:56-70` `regUsername/regEmail/regPassword` + `69: <button onclick="register()">`
+**JS `136-163`**
 ```js
-async function register(){
+async function register(){ // 136
   const username=document.getElementById('regUsername').value; // 137
   const email=document.getElementById('regEmail').value;
   const password=document.getElementById('regPassword').value;
-  const response = await fetch(API_BASE+'/api/v1/auth/register', { // 147
+  const response = await fetch(API_BASE+'/api/v1/auth/register',{ // 147
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({username,email,password}) // 150
+    body: JSON.stringify({username,email,password}) // 150 — JSON passed
   });
-  if(response.ok){ showMessage('Registration successful! Please login.','success'); showForm('login'); } // 154-156 — frontend switches tab to login
+  if(response.ok){ showMessage('Registration successful! Please login.','success'); showForm('login'); } // 154-156 frontend switches tab
 }
 ```
-**Controller `controllers/AuthController.cc:46-74`** validates 3 fields, calls `AuthService::registerUser`.
-**Service `services/AuthService.cc:114-161`** checks duplicate username/email via loop `131-145`, creates `User{id=generateUUID():17-37, password=hashPassword(), role=customer}`, pushes to `users`, returns `user.toJson()` with 201.
+**Route `AuthController.cc:19-21`** `POST /api/v1/auth/register` → `registerUser`
+**Controller `46-74`** `getJsonObject():50` → require 3 fields `51` else 400 → `AuthService::registerUser(*json):61` → 201 else 400
+**Service `AuthService.cc:114-161`** `lock 116` → parse `126` → duplicate check `131-145` loop users → `User{id=generateUUID():17-37, password=hashPassword():41-49 XOR 0x5A, role=customer}` → `push_back:157` → `toJson():160` (excludes password `User.h:31-41`).
+
+### 2.2 Login — Full verify + next page
+**Click** `login.html:43-52` `loginUsername/loginPassword` + `52:login()`
+**JS `105-134`**
+```js
+async function login(){ // 105
+  const username=document.getElementById('loginUsername').value; // 106
+  const password=document.getElementById('loginPassword').value; // 107
+  const response = await fetch(API_BASE+'/api/v1/auth/login',{ // 115
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({username,password}) // 118
+  });
+  const data = await response.json(); // 120
+  if(response.ok){ // 122
+    localStorage.setItem('token',data.token); // 126 — save for all later calls
+    localStorage.setItem('user',JSON.stringify(data.user)); // 127
+    tokenBox.textContent='Token: '+data.token; // 124
+    // NEXT PAGE: window.location.href='/products.html'; — authenticated pages read token
+  }
+}
+```
+**Route `24-26`** `POST /api/v1/auth/login` → `AuthController.cc:79-109` parse `94-95` → `AuthService::loginUser:97`
+**Service `165-189`** `hashPassword(password):169` → loop `171` `if(username== && password==hashed):173` → `generateToken():176 32 hex` → `tokens[token]=user.id:177` → `{token,user.toJson()}` else error. **Verification = username + hashed password equality** against seeded `getUserStorage():68-96` (admin/admin123, customer/customer123).
+
+### 2.3 Validate / Users
+- `GET /api/v1/auth/validate` + `Authorization: Bearer <token>` → `AuthController.cc:28-31,113-141` extracts `substr(7):128` → `AuthService::validateToken:193-213` `tokens.find` → user else error.
+- `GET /api/v1/auth/users` → `34-36,144-151` → `getAllUsers():216-225` array.
+
+### 2.4 Logout
+**JS** `fetch POST /api/v1/auth/logout` with `Authorization: Bearer '+localStorage.getItem('token')` → `removeItem('token'); removeItem('user'); window.location.href='/'`
+**Route `38-41`** → `AuthController.cc:154-184` reads header `158`, `logoutToken:169` → **Service `243-267`** `tokens.erase(it)` → 200. Frontend clears + redirects.
 
 ---
 
-## 4. CRUD OPERATIONS — Product Example (Database Connected)
+## 3. WEEK 2 — Browse + Cart + Checkout/Order (Jul 13-19)
 
-All product routes at `controllers/ProductController.cc:17-44` wired in `sri.cpp:80`.
+### 3.1 Browse (Products)
+**Routes `ProductController.cc:17-44`** `GET /products`, `POST /products`, `GET /products/{id}`, `PUT /products/{id}`, `DELETE /products/{id}`, `GET /products/search`
+- **List** `GET /api/v1/products` → `46-53:getProducts()` → `ProductService.cc:109-147:getAllProducts()` `SELECT ... FROM products:118` → `PQgetvalue` loop `132-143` → JSON → frontend `response.json().forEach(p=> html+=...)`.
+- **Create** `POST /products` `57-75` require name+price `62` → `ProductService.cc:198-232 INSERT:216` → `getProductById:231`.
+- **Get one** `78-97` → `150-195 SELECT WHERE id=$1`.
 
-### CREATE — Add product
-**Frontend**
+### 3.2 Add to Cart — Frontend → Backend → Verify → Store → Frontend badge
+**Click** `<button onclick="addToCart('uuid')">Add to Cart</button>`
 ```js
-await fetch('http://localhost:8080/api/v1/products', {
-  method:'POST', headers:{'Content-Type':'application/json', 'Authorization':'Bearer '+token},
-  body: JSON.stringify({name:"Phone", price:699.99, description:"Smartphone", stock:25})
-});
-```
-**Controller `controllers/ProductController.cc:57-75`**
-```cpp
-auto json = req->getJsonObject(); // 61
-if (!json->isMember("name") || !json->isMember("price")) return 400; // 62
-auto result = ProductService::createProduct(*json); // 71
-resp->setStatusCode(k201Created);
-```
-**Service `services/ProductService.cc:198-232`**
-```cpp
-std::string id = generateUUID(); // 208
-std::string name = productData["name"].asString(); // 209
-const char *paramValues[5] = {id.c_str(), name.c_str(), description.c_str(), price.c_str(), stock.c_str()};
-PGresult *res = PQexecParams(conn,
-  "INSERT INTO products (id, name, description, price, stock) VALUES ($1,$2,$3,$4::decimal,$5::integer)", // 217
-  5, nullptr, paramValues, nullptr,nullptr,0);
-return getProductById(id); // 231 — re-read from DB
-```
-**DB `services/ProductService.cc:20-41,76-106`** — `getConnection()` connects to `host=localhost port=5433 dbname=sri_mart`, `initializeDatabase()` creates table `id VARCHAR(36) PK, name VARCHAR(255), price DECIMAL(10,2), stock INT`.
-
-### READ — List and Get One
-- **List**: `GET /api/v1/products` → `controllers/ProductController.cc:46-53:getProducts()` → `services/ProductService.cc:109-147:getAllProducts()` → `118:SELECT ... FROM products` → loop `PQgetvalue` → JSON array → frontend `await response.json()` and render list.
-- **Get one**: `GET /api/v1/products/{id}` → `78-97:getProductById()` → `services/ProductService.cc:150-195:PQexecParams SELECT ... WHERE id=$1` → 404 if Null.
-
-### UPDATE — Edit product (the `edit` you asked)
-**Frontend (edit button on product row)**
-```js
-// user clicks Edit, fills form, clicks Save
-await fetch('http://localhost:8080/api/v1/products/'+productId, {
-  method:'PUT',
-  headers:{'Content-Type':'application/json'},
-  body: JSON.stringify({name:"Phone Pro", price:799.99, stock:20})
-});
- // frontend then updates DOM: document.getElementById('name-'+id).textContent = "Phone Pro"
-```
-**Controller `controllers/ProductController.cc:101-130`**
-```cpp
-void ProductController::updateProduct(..., std::string productId){ // 101
-  auto json = req->getJsonObject(); if(!json) return 400; // 106
-  auto result = ProductService::updateProduct(productId, *json); // 116
-  if(result.isNull()) return 404; else callback(json);
-}
-```
-**Service `services/ProductService.cc:235-279`**
-```cpp
-// 244 check exists
-PGresult *checkRes = PQexecParams(conn, "SELECT id FROM products WHERE id=$1",...);
-if(PQntuples(checkRes)==0) return Null;
-// 264 update
-PGresult *res = PQexecParams(conn,
-  "UPDATE products SET name=$1, description=$2, price=$3::decimal, stock=$4::integer, updated_at=CURRENT_TIMESTAMP WHERE id=$5", // 265
-  5, nullptr, paramValues,...,0);
-return getProductById(id); // 278 — return updated row
-```
-- Frontend sees updated JSON and **re-renders** the product card without full reload.
-
-### DELETE
-`DELETE /api/v1/products/{id}` → `controllers/ProductController.cc:133-154:deleteProduct()` → `services/ProductService.cc:282-305:DELETE FROM products WHERE id=$1` → `PQcmdTuples[0]!='0'` → frontend removes element: `element.remove()`.
-
----
-
-## 5. ADD TO CART — Full Workflow
-
-**Frontend button on product list**
-```html
-<button onclick="addToCart('product-uuid-123')">Add to Cart</button>
-<script>
 async function addToCart(productId){
-  const token = localStorage.getItem('token');
-  const resp = await fetch('http://localhost:8080/api/v1/cart', {
-    method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-    body: JSON.stringify({productId, quantity:1}) // data passed
+  const token=localStorage.getItem('token');
+  const resp=await fetch('/api/v1/cart',{
+    method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body: JSON.stringify({productId, quantity:1}) // passed
   });
-  const data = await resp.json();
-  if(resp.ok){
-    document.getElementById('cartCount').textContent = parseInt(cartCount)+1; // frontend change: badge +1
-    showMessage('Added to cart','success');
-  }
-}
-</script>
-```
-
-**Route `controllers/CartController.cc:27-41`**
-```cpp
-app().registerHandler("/api/v1/cart", &CartController::addToCart, {Post});
-```
-
-**Controller `controllers/CartController.cc:76-108` exact**
-```cpp
-void CartController::addToCart(...) {
-  std::string token = getBearer(req); // 78 — reads Authorization header
-  std::string userId = AuthService::getUserIdFromToken(token); // 79 — verify token
-  if(userId.empty()) return 401; // no login
-  auto json = req->getJsonObject(); // 92
-  int qty = json->get("quantity",1).asInt(); // 98
-  auto result = CartService::addItem(userId, (*json)["productId"].asString(), qty); // 99
+  if(resp.ok){ cartCount.textContent = +cartCount.textContent+1; showMessage('Added'); }
 }
 ```
+**Route `CartController.cc:27-41`** `POST /api/v1/cart` → `addToCart`
+**Controller `76-108`** `getBearer:78` → `getUserIdFromToken:79` else 401 → require productId `92` → `CartService::addItem:99` → 201
+**Service `CartService.cc:39-62`** validates `ProductService::getProductById:47` else error, merges qty if exists else `CartItem{userId,productId,qty}` pushed to `map<userId,vector>:5-14`. **DB check** ensures product exists in Postgres before cart.
 
-**Service `services/CartService.cc:39-62`**
-```cpp
-Json::Value CartService::addItem(userId, productId, quantity){
-  if(quantity<=0) return error;
-  auto product = ProductService::getProductById(productId); // 47 — verify product exists in DB
-  if(product.isNull()) return {error:"Product not found"};
-  auto &items = getStorage()[userId]; // in-memory map
-  for(auto &item: items) if(item.productId==productId){ item.quantity+=quantity; return item.toJson(); }
-  CartItem item; item.userId=userId; item.productId=productId; item.quantity=quantity;
-  items.push_back(item); return item.toJson();
-}
-```
-**Storage `services/CartService.cc:5-14`**
-```cpp
-std::map<std::string, std::vector<CartItem>> &getStorage(){ static ... carts; return carts; }
-```
-**Model `models/CartItem.h:14-22`** `userId, productId, quantity` + `toJson()`.
+### 3.3 View Cart / Remove
+- `GET /api/v1/cart` → `CartController.cc:48-66` → `CartService.cc:23-37` array → frontend renders.
+- `DELETE /api/v1/cart/{productId}` → `110-134` → `CartService.cc:64-82:removeItem` erase → frontend `element.remove()`.
 
-**View cart** `GET /api/v1/cart` → `controllers/CartController.cc:48-66` → `services/CartService.cc:23-37` array, frontend renders via `resp.json().forEach(item=> html+=...)`.
-**Remove** `DELETE /api/v1/cart/{productId}` → `110-134` → frontend `remove()`.
+### 3.4 Checkout / Billing
+**Click Checkout** `fetch POST /api/v1/orders/checkout` with Bearer → `window.location.href='/orders.html'`
+**Route `OrderController.cc:24-31`** `POST /orders/checkout` → `checkout`
+**Controller `33-53`** auth `37` → `OrderService::checkout:42`
+**Service `OrderService.cc:28-51`** `getCart:30` if 0 error, sum `product["price"]*qty` via `ProductService::getProductById:37`, `Order{id=UUID, userId, total, status=created}` `43-49` → `clearCart:50`. **Model `Order.h:14-27`**. Planned Postgres `BEGIN; INSERT orders; INSERT order_items; UPDATE stock; COMMIT;`.
 
 ---
 
-## 6. CHECKOUT / BILLING — How Cart Becomes Order
+## 4. WEEK 3-4 — Seller Dashboard + Admin (Jul 20-Aug 2)
 
-**Frontend Checkout button**
+**Seller** `GET /api/v1/seller/stats` + Bearer → `AdminController.cc:24-46:sellerStats()` → `validateToken:29` → `ProductService::getAllProducts().size():37` → `{role, productCount, note}` — per-seller ownership planned.
+**Admin** `GET /api/v1/admin/stats` → `48-71:adminStats()` → role check `60` `!=admin →403` → returns `{userCount: AuthService::getAllUsers().size(), productCount}`. Frontend shows stats cards; non-admin gets forbidden.
+
+---
+
+## 5. WEEK 5 — Search/Filter + Order Status (Aug 3-9)
+
+- **Search** `GET /api/v1/products/search?q=phone&minPrice=100&maxPrice=800` → `ProductController.cc:44,156-174:searchProducts()` `getParameter("q"):163` `stod min/max:164` → `ProductService.cc:309-331` `getAllProducts()` then RAM filter `find(q):317` + price range `321/325` → frontend updates list without reload.
+- **Order status** `PUT /api/v1/orders/{id}/status {status:"paid|shipped"}` → `OrderController.cc:91-127:updateStatus()` → `OrderService.cc:68-86` validates `created|paid|shipped` → updates, else 400/404 → frontend badge `status.textContent = "Paid"`.
+
+---
+
+## 6. WEEK 6 — Reviews + Ratings + Validation (Aug 10-16)
+
+**Routes `ReviewController.cc:12-16`** `GET/POST /products/{id}/reviews`
+- **List** `18-24` → `ReviewService.cc:31-40:getByProduct()` array → stars rendered.
+- **Add** `POST` + Bearer → `26-46:addReview()` auth `30`, `rating/comment:38-39` → `ReviewService.cc:50-68:addReview()` validates `1-5:42` → `ProductService::getProductById` exists → `Review{id,productId,userId,rating,comment}` → 201. **Model `Review.h:10-24`**.
+
+---
+
+## 7. WEEK 7 — Security + Testing + Sanitizers (Aug 17-23)
+
+- Passwords hashed `AuthService.cc:41-49` XOR (demo, planned bcrypt), `toJson()` excludes password `User.h:31-41`.
+- Tokens are random 32-hex `AuthService.cc:52-64`, Bearer required `AuthController.cc:113,158`, mutex `getMutex():106` protects users/tokens, `ProductService.cc:44-50` `PQclear` prevents leaks.
+- Testing checkpoints `WEEKLY_PROJECT_SCHEDULE.md` + cURL `FINAL_REVIEW.md:17-23` + placeholder sanitizer hooks.
+
+## 8. WEEK 8 — Deployment + Cloud Testing (Aug 24-30)
+
+- `CMakeLists.txt:18-32` builds `sri_mart` via `MinGW + vcpkg + Drogon + pq`, `start.bat/dev.bat` run `build/sri_mart.exe` expecting `Connected to PostgreSQL: sri_mart` on `0.0.0.0:8080` (`sri.cpp:96`), `stop.bat` stops PG. Cloud: same binary + `drogon.json` port + `PQconnectdb` env.
+
+## 9. WEEK 9 — AI Chatbot Integration (Aug 31-Sep 6)
+
+**Route `ChatController.cc:12-31`** `POST /api/v1/chat`
 ```js
-await fetch('http://localhost:8080/api/v1/orders/checkout', {
-  method:'POST', headers:{'Authorization':'Bearer '+token}
-});
-// then
-window.location.href = '/orders.html'; // open orders page
+await fetch('/api/v1/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:"hour?"})});
 ```
+**Controller `22-37`** expects `{message}` else 400, keyword replies `hour→Open 9am-9pm, return→Returns 7 days, offer→check /products/search` → `{reply, echo}`. Planned LLM swap.
 
-**Controller `controllers/OrderController.cc:33-53`**
-```cpp
-void OrderController::checkout(...){
-  std::string userId = authUser(req); // Bearer → userId
-  auto result = OrderService::checkout(userId); // 42
-}
-```
-**Service `services/OrderService.cc:28-51`**
-```cpp
-Json::Value OrderService::checkout(const std::string &userId){
-  auto cart = CartService::getCart(userId); if(cart.size()==0) return {error:"Cart is empty"};
-  double total=0; for(auto &line: cart){
-    auto product = ProductService::getProductById(line["productId"].asString()); // fetch price from DB
-    total += product["price"].asDouble() * line["quantity"].asInt();
-  }
-  Order order; order.id=generateUUID(); order.userId=userId; order.total=total; order.status="created";
-  getStorage().push_back(order);
-  CartService::clearCart(userId); // 50 — empty cart after billing
-  return order.toJson();
-}
-```
-- Frontend then **navigates** to orders list: `GET /api/v1/orders` → `controllers/OrderController.cc:55-70` → `services/OrderService.cc:53-65` filtered by userId → render.
+## 10. WEEK 10 — Chatbot Refinement + UI + Docs (Sep 7-13)
+
+- UI is `login.html:1-174` tabs `showForm():79-91`, `showMessage():93-97`, `localStorage` tokenBox `124-127`, Enter-key `166-171`. Refinement = same `ChatController` + richer prompts.
+- Docs: `README.md:1-106` API table/health/auth/products, `ARCHITECTURE.md:1-73` layers, `COMPLETE_WORKFLOW.md:1-178` traces, `WEEKLY_PROJECT_SCHEDULE.md` table.
+
+## 11. WEEK 11 — Final Testing + Report + PPT + Rehearsal (Sep 14-21)
+
+**Live demo `FINAL_REVIEW.md:1-35`**:
+1. `GET /health` → `{"status":"UP"}` (`sri.cpp:28-33`)
+2. Register `POST /auth/register` → 201
+3. Login `POST /auth/login` → `{token,user}` → `login.html:126-127` stores
+4. Validate `GET /auth/validate` Bearer
+5. Products `POST /products` + `GET /products` (Postgres)
+6. Cart `POST /cart` + checkout `POST /orders/checkout` → `window.location`
+7. Show `ARCHITECTURE.md` flow
+**cURL rehearsal `FINAL_REVIEW.md:17-23`** + checklist `31-35` (PG `5433`, `cmake --build build`, health/login/products). **PPT** `FINAL_REVIEW.md:25-29` tech stack, API table, DB schema, limits (in-memory auth/cart), next steps (Postgres auth/bcrypt, stock decrement).
 
 ---
 
-## 7. How Pages Change (Frontend Navigation)
+## 12. END-TO-END EXAMPLE — One User Journey Across All Weeks
 
-- **After login**: `localStorage.setItem('token',...)` at `login.html:126`, then `window.location.href = '/dashboard'` or staying on same page and showing `tokenBox`. Future pages check `if(!localStorage.getItem('token')) window.location.href='/'` to force login.
-- **After logout**: `localStorage.removeItem` + `window.location.href='/'` back to login.
-- **After CRUD/cart/checkout**: No full reload needed — JS updates DOM (`innerHTML`, `textContent`, `element.remove()`) based on JSON response. Or `location.reload()` for simple demo.
+1. **Register** `login.html:136-163` → `AuthController:46-74` → `AuthService:114-161` → in-memory.
+2. **Login** `105-134` → `79-109` → `165-189` → token → `localStorage:126` → `window.location.href='/products.html'`.
+3. **Browse** `ProductController:46-53` → `ProductService:109-147` Postgres → render.
+4. **Search** `ProductController:156-174` → `ProductService:309-331` → filtered list.
+5. **Add to cart** `CartController:76-108` → `CartService:39-62` verifies product in DB → cart map.
+6. **Edit product** (seller) `PUT /products/{id}` `101-130` → `ProductService:235-279 UPDATE`.
+7. **Checkout** `OrderController:33-53` → `OrderService:28-51` sums DB prices → order → `clearCart`.
+8. **Review** `ReviewController:26-46` → `ReviewService:50-68` → stars.
+9. **Admin stats** `AdminController:48-71` Bearer admin → counts.
+10. **Chat** `ChatController:22-37` → reply.
+11. **Logout** `AuthController:154-184` → erase token → `localStorage.clear()` → `location.href='/'`.
 
-## 8. Folder/File with Code Comments (Reference)
+## 13. Folder/File Code Comments (Reference)
 
-All files start with `// MODULE: ... PURPOSE: ... WHY: ...`:
-- `sri.cpp:1-8` entry, `sri.cpp:93` DB init, `sri.cpp:96-98` run
-- `controllers/AuthController.h:1-8` + `.cc:1-8` controller layer
-- `services/AuthService.h:1-8` + `.cc:1-8` service, `68-103` stores
-- `models/User.h:1-8` + `Product.h:1-8` models
-- `services/ProductService.h:1-8` + `.cc:1-8` Postgres, `20-41` connection, `76-106` table
-- `CMakeLists.txt:1-8` build
+All files start `// MODULE: ... PURPOSE: ... WHY: ... INPUT: ... OUTPUT: ... ARCHITECTURE: ...`:
+`sri.cpp:1-8`, `AuthController.h:1-8`, `ProductController.h:1-8`, `CartController.h`, `OrderController`, `ReviewController`, `AdminController`, `ChatController`, `AuthService.h:1-8`, `ProductService.h:1-8` (`getConnection:20-41`, `initializeDatabase:76-106`), `CartService`, `OrderService`, `ReviewService`, `User.h:1-8`, `Product.h:1-8`, `CartItem.h`, `Order.h`, `Review.h`, `CMakeLists.txt:1-8`, `drogon.json:1-14`, `login.html:76-77` API_BASE.
 
-This file covers login, logout, CRUD (create/read/update-edit/delete), add-to-cart, billing — each with exact frontend `fetch` code, how data is passed as JSON, how backend verifies (hash + token + DB `PQexecParams`), how data is stored (Postgres vs in-memory), and how frontend changes (localStorage + DOM + navigation).
+This is the **overall workflow for all things** — one click on any frontend button travels `fetch JSON → Drogon route → Controller (file:line) → Service (file:line) → Model/DB (file:line) → JSON → frontend localStorage/DOM/window.location`.
