@@ -50,30 +50,71 @@ int main()
         },
         {drogon::Get});
 
+    // Helper to serve HTML files from config folder
+    auto serveHtml = [](const std::string &path, std::function<void(const drogon::HttpResponsePtr &)> &&callback){
+        std::ifstream file(path);
+        if (file.is_open()){
+            std::stringstream buffer; buffer << file.rdbuf();
+            auto resp = drogon::HttpResponse::newHttpResponse();
+            resp->setBody(buffer.str());
+            resp->setContentTypeCode(drogon::CT_TEXT_HTML);
+            callback(resp);
+        } else {
+            Json::Value json; json["message"] = "Page not found: " + path;
+            auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+            resp->setStatusCode(drogon::k404NotFound);
+            callback(resp);
+        }
+    };
+
     // Login page: serves the HTML login/register form.
     drogon::app().registerHandler(
         "/",
-        [](const drogon::HttpRequestPtr &req,
+        [serveHtml](const drogon::HttpRequestPtr &req,
            std::function<void(const drogon::HttpResponsePtr &)> &&callback)
-        {
-            std::ifstream file("config/login.html");
-            if (file.is_open())
-            {
-                std::stringstream buffer;
-                buffer << file.rdbuf();
-                auto resp = drogon::HttpResponse::newHttpResponse();
-                resp->setBody(buffer.str());
-                resp->setContentTypeCode(drogon::CT_TEXT_HTML);
-                callback(resp);
-            }
-            else
-            {
-                Json::Value json;
-                json["message"] = "Sri Mart API is running. Visit /api/v1/health for status.";
-                auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
-                callback(resp);
-            }
-        },
+        { serveHtml("config/login.html", std::move(callback)); },
+        {drogon::Get});
+
+    // Buyer dashboard — separate page for customer role, lively DB
+    drogon::app().registerHandler(
+        "/buyer",
+        [serveHtml](const drogon::HttpRequestPtr &req,
+           std::function<void(const drogon::HttpResponsePtr &)> &&callback)
+        { serveHtml("config/buyer.html", std::move(callback)); },
+        {drogon::Get});
+    drogon::app().registerHandler(
+        "/buyer.html",
+        [serveHtml](const drogon::HttpRequestPtr &req,
+           std::function<void(const drogon::HttpResponsePtr &)> &&callback)
+        { serveHtml("config/buyer.html", std::move(callback)); },
+        {drogon::Get});
+
+    // Seller dashboard — separate page for seller role, lively DB CRUD
+    drogon::app().registerHandler(
+        "/seller",
+        [serveHtml](const drogon::HttpRequestPtr &req,
+           std::function<void(const drogon::HttpResponsePtr &)> &&callback)
+        { serveHtml("config/seller.html", std::move(callback)); },
+        {drogon::Get});
+    drogon::app().registerHandler(
+        "/seller.html",
+        [serveHtml](const drogon::HttpRequestPtr &req,
+           std::function<void(const drogon::HttpResponsePtr &)> &&callback)
+        { serveHtml("config/seller.html", std::move(callback)); },
+        {drogon::Get});
+
+    // Admin dashboard — proper admin login
+    drogon::app().registerHandler(
+        "/admin",
+        [serveHtml](const drogon::HttpRequestPtr &req,
+           std::function<void(const drogon::HttpResponsePtr &)> &&callback)
+        { serveHtml("config/admin.html", std::move(callback)); },
+        {drogon::Get});
+    drogon::app().registerHandler(
+        "/admin.html",
+        [serveHtml](const drogon::HttpRequestPtr &req,
+           std::function<void(const drogon::HttpResponsePtr &)> &&callback)
+        { serveHtml("config/admin.html", std::move(callback)); },
         {drogon::Get});
 
     // Register all product-related routes (GET, POST, PUT, DELETE, search).

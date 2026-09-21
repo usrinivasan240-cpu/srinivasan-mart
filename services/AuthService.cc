@@ -81,7 +81,7 @@ std::vector<User> &AuthService::getUserStorage()
         admin.updated_at = "2026-08-13 12:00:00";
         users.push_back(admin);
 
-        // Create default customer user
+        // Create default customer user (buyer)
         User customer;
         customer.id = generateUUID();
         customer.username = "customer";
@@ -91,6 +91,17 @@ std::vector<User> &AuthService::getUserStorage()
         customer.created_at = "2026-08-13 12:00:00";
         customer.updated_at = "2026-08-13 12:00:00";
         users.push_back(customer);
+
+        // Create default seller user
+        User seller;
+        seller.id = generateUUID();
+        seller.username = "seller";
+        seller.email = "seller@srimart.com";
+        seller.password = hashPassword("seller123");
+        seller.role = "seller";
+        seller.created_at = "2026-08-13 12:00:00";
+        seller.updated_at = "2026-08-13 12:00:00";
+        users.push_back(seller);
     }
     return users;
 }

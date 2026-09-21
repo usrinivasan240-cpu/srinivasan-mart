@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sri Mart - Admin</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f0f2f5}
+.header{background:#673ab7;color:white;padding:15px 30px;display:flex;justify-content:space-between;align-items:center}
+.container{max-width:900px;margin:20px auto;padding:20px}
+.card{background:white;border-radius:8px;padding:20px;box-shadow:0 2px 6px rgba(0,0,0,.1);margin-bottom:15px}
+button{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;background:#673ab7;color:white}
+</style>
+</head>
+<body>
+<div class="header"><h1>🛡️ Sri Mart — Admin</h1><div><span id="userInfo"></span><button onclick="logout()">Logout</button></div></div>
+<div class="container">
+  <div class="card">
+    <h3>Admin Stats — Lively from DB + In-Memory</h3>
+    <p>Users: <b id="userCount">-</b> | Products (PostgreSQL): <b id="prodCount">-</b></p>
+    <button onclick="loadStats()">Refresh</button>
+  </div>
+  <div class="card">
+    <h3>All Users (<code>GET /api/v1/auth/users</code>)</h3>
+    <pre id="users" style="background:#f5f5f5;padding:10px;border-radius:5px;overflow:auto;max-height:300px"></pre>
+  </div>
+  <div class="card">
+    <h3>All Products (<code>GET /api/v1/products</code>)</h3>
+    <pre id="products" style="background:#f5f5f5;padding:10px;border-radius:5px;overflow:auto;max-height:300px"></pre>
+  </div>
+</div>
+<script>
+const API='http://localhost:8080';
+let token=localStorage.getItem('token');
+let user=JSON.parse(localStorage.getItem('user')||'null');
+if(!token||!user) window.location.href='/';
+document.getElementById('userInfo').textContent=user.username+' ('+user.role+')';
+fetch(API+'/api/v1/auth/validate',{headers:{'Authorization':'Bearer '+token}}).then(r=>r.json()).then(d=>{
+  if(d.error||d.role!=='admin'){ alert('Admin only'); window.location.href='/'; } else loadStats();
+});
+async function loadStats(){
+  const r=await fetch(API+'/api/v1/admin/stats',{headers:{'Authorization':'Bearer '+token}});
+  const d=await r.json();
+  if(r.ok){ document.getElementById('userCount').textContent=d.userCount; document.getElementById('prodCount').textContent=d.productCount; }
+  const ru=await fetch(API+'/api/v1/auth/users'); document.getElementById('users').textContent=JSON.stringify(await ru.json(),null,2);
+  const rp=await fetch(API+'/api/v1/products'); document.getElementById('products').textContent=JSON.stringify(await rp.json(),null,2);
+}
+async function logout(){ await fetch(API+'/api/v1/auth/logout',{method:'POST',headers:{'Authorization':'Bearer '+token}}); localStorage.clear(); window.location.href='/';}
+</script>
+</body>
+</html>
