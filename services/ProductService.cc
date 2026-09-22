@@ -8,6 +8,7 @@
 // ============================================================
 
 #include "ProductService.h"
+#include <cmath>
 #include <random>
 #include <sstream>
 #include <iostream>
@@ -69,6 +70,12 @@ PGconn *ProductService::getConnection()
         }
     }
     return g_conn;
+}
+
+// Money is always rounded to the cent before JSON leaves the service.
+static double sri_roundMoney(double v)
+{
+    return std::round(v * 100.0) / 100.0;
 }
 
 // Frees a PGresult after use (prevents memory leaks).
@@ -176,7 +183,7 @@ Json::Value ProductService::getAllProducts(int limit, int offset)
         item["id"] = PQgetvalue(res, i, 0);
         item["name"] = PQgetvalue(res, i, 1);
         item["description"] = PQgetvalue(res, i, 2);
-        try { item["price"] = std::stod(PQgetvalue(res, i, 3)); }
+        try { item["price"] = sri_roundMoney(std::stod(PQgetvalue(res, i, 3))); }
         catch (...) { item["price"] = 0.0; }
         try { item["stock"] = std::stoi(PQgetvalue(res, i, 4)); }
         catch (...) { item["stock"] = 0; }
@@ -226,7 +233,7 @@ Json::Value ProductService::getProductById(const std::string &id)
         item["id"] = PQgetvalue(res, 0, 0);
         item["name"] = PQgetvalue(res, 0, 1);
         item["description"] = PQgetvalue(res, 0, 2);
-        try { item["price"] = std::stod(PQgetvalue(res, 0, 3)); }
+        try { item["price"] = sri_roundMoney(std::stod(PQgetvalue(res, 0, 3))); }
         catch (...) { item["price"] = 0.0; }
         try { item["stock"] = std::stoi(PQgetvalue(res, 0, 4)); }
         catch (...) { item["stock"] = 0; }
@@ -259,7 +266,7 @@ Json::Value ProductService::createProduct(const Json::Value &productData)
         error["error"] = "Name is required (max 255 chars)";
         return error;
     }
-    double priceVal = productData.get("price", -1.0).asDouble();
+    double priceVal = sri_roundMoney(productData.get("price", -1.0).asDouble());
     int stockVal = productData.get("stock", 0).asInt();
     if (priceVal < 0 || priceVal > 100000000)
     {
@@ -327,8 +334,8 @@ Json::Value ProductService::updateProduct(const std::string &id, const Json::Val
         ? productData["name"].asString() : existing.get("name", "").asString();
     std::string description = productData.isMember("description")
         ? productData["description"].asString() : existing.get("description", "").asString();
-    double priceVal = productData.isMember("price")
-        ? productData["price"].asDouble() : existing.get("price", 0.0).asDouble();
+    double priceVal = sri_roundMoney(productData.isMember("price")
+        ? productData["price"].asDouble() : existing.get("price", 0.0).asDouble());
     int stockVal = productData.isMember("stock")
         ? productData["stock"].asInt() : existing.get("stock", 0).asInt();
     if (name.empty() || name.size() > 255)
@@ -438,7 +445,7 @@ Json::Value ProductService::searchProducts(const std::string &query, double minP
         item["id"] = PQgetvalue(res, i, 0);
         item["name"] = PQgetvalue(res, i, 1);
         item["description"] = PQgetvalue(res, i, 2);
-        try { item["price"] = std::stod(PQgetvalue(res, i, 3)); }
+        try { item["price"] = sri_roundMoney(std::stod(PQgetvalue(res, i, 3))); }
         catch (...) { item["price"] = 0.0; }
         try { item["stock"] = std::stoi(PQgetvalue(res, i, 4)); }
         catch (...) { item["stock"] = 0; }
@@ -527,11 +534,12 @@ bool ProductService::checkoutItems(const std::vector<std::pair<std::string, int>
         if (qty <= 0 || qty > 99) { execOk("ROLLBACK"); err = "Invalid quantity"; return false; }
         Json::Value product = getProductById(pid);
         if (product.isNull()) { execOk("ROLLBACK"); err = "Product not found: " + pid; return false; }
-        double price = product.get("price", 0.0).asDouble();
+        double price = sri_roundMoney(product.get("price", 0.0).asDouble());
         std::string derr;
         if (!decrementStock(pid, qty, derr)) { execOk("ROLLBACK"); err = derr; return false; }
         total += price * qty;
     }
     if (!execOk("COMMIT")) { execOk("ROLLBACK"); err = "Checkout commit failed"; return false; }
+    total = sri_roundMoney(total);
     return true;
 }

@@ -6,9 +6,9 @@ A C++20 backend API for an e-commerce store, built with Drogon and PostgreSQL. H
 
 - **Language:** C++20
 - **Framework:** Drogon (HTTP server + JSON)
-- **Database:** PostgreSQL (via libpq, port 5433)
-- **Build:** CMake + vcpkg + MSYS2 UCRT64 / MinGW
-- **Frontend:** Static HTML login page served at `/`
+- **Database:** PostgreSQL (via libpq)
+- **Build:** CMake (MSYS2/Docker via Drogon from source)
+- **Frontend:** Static HTML pages (`/`, `/buyer`, `/seller`, `/admin`, `/order`) + floating Sri Assistant
 
 ## Features
 
@@ -27,16 +27,14 @@ A C++20 backend API for an e-commerce store, built with Drogon and PostgreSQL. H
 
 ```text
 srinivasan-mart/
-├── sri.cpp                  # App entry point, route registration, port 8080
-├── CMakeLists.txt           # Build config, target sri_mart
-├── controllers/             # HTTP layer: AuthController, ProductController
-├── services/                # Business logic: AuthService, ProductService
-├── models/                  # Data structs: User, Product
-├── config/
-│   ├── drogon.json          # Listener + log config
-│   └── login.html           # Login/Register UI
-├── start.bat / dev.bat / stop.bat
-└── ARCHITECTURE.md
+├── sri.cpp + Dockerfile + render.yaml  # Entry, Docker, Render blueprint
+├── CMakeLists.txt                        # Build config, target sri_mart
+├── controllers/   # Auth/Product/Cart/Order/Review/Admin/Chat
+├── services/      # Auth/Product/Cart/Order/Review
+├── models/        # User/Product/CartItem/Order/Review
+├── config/        # login/buyer/seller/admin/order.html + api-config.js
+├── vercel.json + .env.example
+└── start.bat / dev.bat / stop.bat + ARCHITECTURE.md
 ```
 
 Architecture flow: `Client -> Drogon routes -> Controller -> Service -> Model/DB -> JSON response`
@@ -46,7 +44,8 @@ Architecture flow: `Client -> Drogon routes -> Controller -> Service -> Model/DB
 ### Health & UI
 | Method | URL | Purpose |
 |--------|-----|---------|
-| GET | `/` | Login page (HTML) |
+| GET | `/` | Login page |
+| GET | `/buyer`, `/seller`, `/admin`, `/order` | Role pages + bill page |
 | GET | `/api/v1/health` | `{"status":"UP"}` |
 | GET | `/api/v1/hello` | `{"message":"Welcome to Sri Mart API"}` |
 
@@ -56,22 +55,23 @@ Architecture flow: `Client -> Drogon routes -> Controller -> Service -> Model/DB
 | POST | `/api/v1/auth/register` | `{username,email,password}` -> 201 user |
 | POST | `/api/v1/auth/login` | `{username,password}` -> `{token,user}` |
 | GET | `/api/v1/auth/validate` | `Authorization: Bearer <token>` -> user |
-| GET | `/api/v1/auth/users` | List users (no passwords) |
+| GET | `/api/v1/auth/users` | List users (admin-only) |
 
 ### Products
 | Method | URL | Purpose |
 |--------|-----|---------|
-| GET | `/api/v1/products` | List all |
-| POST | `/api/v1/products` | `{name,price,description?,stock?}` |
+| GET | `/api/v1/products` | List all (`?limit=&offset=`, max 500) |
+| GET | `/api/v1/products/search` | Case-insensitive search (`?q=&minPrice=&maxPrice=&limit=&offset=`) |
+| POST | `/api/v1/products` | `{name,price,description?,stock?}` (seller/admin only) |
 | GET | `/api/v1/products/{id}` | Get one |
-| PUT | `/api/v1/products/{id}` | Update |
-| DELETE | `/api/v1/products/{id}` | Delete |
+| PUT | `/api/v1/products/{id}` | Update (seller/admin only) |
+| DELETE | `/api/v1/products/{id}` | Delete (seller/admin only) |
 
 ## Getting Started
 
 ### Prerequisites
-- MSYS2 UCRT64 (MinGW), CMake, vcpkg with Drogon installed
-- PostgreSQL running with database `sri_mart` (default expects `localhost:5433`, user `postgres`)
+- **Windows local:** MSYS2 UCRT64 (MinGW), CMake, vcpkg with Drogon — or Docker.
+- PostgreSQL running with database `sri_mart` (local default `localhost:5433`, user `postgres`); on Render it's auto-wired via `render.yaml`.
 
 ### Build
 ```cmd
@@ -128,10 +128,10 @@ C++ server serves them itself).
 ## Notes
 - Products are persisted in PostgreSQL `products` table (auto-created on startup).
 - Auth storage is in-memory with salted SHA-256 password hashes (`salt$hex`, 10k rounds via OpenSSL when available, legacy XOR accounts still verify). PostgreSQL + bcrypt migration is the next step.
-- DB connection reads `PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD` env vars (see `.env.example`); HTTP port reads `PORT` (default 8080). All libpq use is serialized on a mutex; checkout reserves stock in one transaction.
-- Tokens expire after 24h. Usernames (`3-32`, alnum/`_`-), emails, and field lengths are validated server-side.
+- DB connection reads `PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD` env vars (see `.env.example`); HTTP port reads `PORT` (default 8080). All libpq use is serialized on a recursive mutex; checkout reserves stock in one Postgres transaction.
+- Tokens expire after 24h. Usernames (`3-32`, alnum/`_`-), emails, and field lengths are validated server-side. Money is rounded to the cent.
 - `start.bat` / `dev.bat` / `stop.bat` are portable (relative paths, `PG_CTL`/`PGDATA_DIR`/`VCPKG_TOOLCHAIN` env overrides) — no hardcoded user folders.
 - `POST/PUT/DELETE /api/v1/products` require seller/admin Bearer token; `GET /api/v1/auth/users` is admin-only; self-register can only create `customer`/`seller` (never `admin`).
-- `GET /api/v1/products` and `/products/search` support `?limit=&offset=` (search is case-insensitive `ILIKE` in SQL); checkout runs in a Postgres transaction and decrements stock atomically.
-- Frontend uses same-origin API (`window.location.origin`) + auth headers on seller writes + HTML escaping.
+- `GET /api/v1/products` and `/products/search` support `?limit=&offset=` (search is case-insensitive `ILIKE` in SQL); checkout decrements stock atomically; buyer has a bill page (`/order`), chat widget, and order polling; server supports cross-origin (CORS).
+- Frontend uses `window.location.origin` + `config/api-config.js` override, with auth headers on seller writes + HTML escaping.
 - See `ARCHITECTURE.md` for layer details and `config/drogon.json` for port/log config.
