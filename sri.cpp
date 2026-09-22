@@ -33,6 +33,38 @@ int main()
     // Start the server and listen for HTTP requests.
     drogon::app().addListener("0.0.0.0", static_cast<uint16_t>(port));
 
+    // CORS: the UI is statically hosted (e.g. Vercel) on a different origin,
+    // so browsers preflight every JSON/Authorization request with OPTIONS.
+    // Answer preflights globally and tag every response for cross-origin use.
+    drogon::app().registerPreRoutingAdvice(
+        [](const drogon::HttpRequestPtr &req,
+           drogon::AdviceCallback &&aboutToStop,
+           drogon::AdviceChainCallback &&passOn)
+        {
+            if (req->getMethod() == drogon::Options)
+            {
+                auto resp = drogon::HttpResponse::newHttpResponse();
+                resp->setStatusCode(drogon::k204NoContent);
+                resp->addHeader("Access-Control-Allow-Origin", "*");
+                resp->addHeader("Access-Control-Allow-Methods",
+                                "GET, POST, PUT, DELETE, OPTIONS");
+                resp->addHeader("Access-Control-Allow-Headers",
+                                "Content-Type, Authorization");
+                resp->addHeader("Access-Control-Max-Age", "86400");
+                aboutToStop(resp);
+            }
+            else
+            {
+                passOn();
+            }
+        });
+    drogon::app().registerPostHandlingAdvice(
+        [](const drogon::HttpRequestPtr &,
+           const drogon::HttpResponsePtr &resp)
+        {
+            resp->addHeader("Access-Control-Allow-Origin", "*");
+        });
+
     // Health check endpoint: tells us if the server is alive.
     drogon::app().registerHandler(
         "/api/v1/health",

@@ -82,13 +82,74 @@
 
         <div id="message" class="message"></div>
         <div id="tokenBox" class="token-box"></div>
+
+        <div style="margin-top:15px;font-size:12px;color:#888;text-align:center;">
+            <a href="#" id="srvToggle" style="color:#4CAF50;">Server settings</a>
+            <div id="srvPanel" style="display:none;margin-top:8px;text-align:left;">
+                <label style="font-size:12px;">Backend API URL (where sri_mart runs)</label>
+                <input type="text" id="apiBase" placeholder="https://<your-api>.onrender.com">
+                <button onclick="saveApiBase()" style="margin-top:8px;">Save &amp; Test</button>
+                <div id="srvStatus" style="font-size:12px;margin-top:5px;"></div>
+            </div>
+        </div>
     </div>
 
     <script>
         // Fix: use same-origin instead of hardcoded localhost:8080 (deploy-safe).
         // sriApiBase() comes from /config/api-config.js (same-origin locally,
         // override to backend URL when served statically, e.g. on Vercel).
-        const API_BASE = (typeof sriApiBase === "function") ? sriApiBase() : window.location.origin;
+        let API_BASE = (typeof sriApiBase === "function") ? sriApiBase() : window.location.origin;
+
+        // Smarter connection error: on static hosting with no backend
+        // configured, tell the user exactly what to do.
+        function apiUnconfigured() {
+            try {
+                if (localStorage.getItem("sri_api_base")) return false;
+            } catch (e) {}
+            if (window.SRI_API_BASE) return false;
+            return window.location.hostname.indexOf("vercel.app") !== -1;
+        }
+        function connError() {
+            if (apiUnconfigured())
+                return "No backend configured. Open Server settings below and paste your API URL (Render), then Save & Test.";
+            return "Cannot connect to server. Is it running?";
+        }
+
+        // Server-settings panel wiring.
+        document.getElementById("srvToggle").addEventListener("click", function (e) {
+            e.preventDefault();
+            var panel = document.getElementById("srvPanel");
+            panel.style.display = (panel.style.display === "none") ? "block" : "none";
+            try {
+                document.getElementById("apiBase").value = localStorage.getItem("sri_api_base") || window.SRI_API_BASE || "";
+            } catch (err) {}
+        });
+
+        async function saveApiBase() {
+            var v = document.getElementById("apiBase").value.trim().replace(/\/+$/, "");
+            try {
+                if (v) localStorage.setItem("sri_api_base", v);
+                else localStorage.removeItem("sri_api_base");
+            } catch (e) {}
+            API_BASE = (typeof sriApiBase === "function") ? sriApiBase() : window.location.origin;
+            var st = document.getElementById("srvStatus");
+            st.style.color = "#888";
+            st.textContent = "Testing " + API_BASE + " ...";
+            try {
+                const r = await fetch(API_BASE + "/api/v1/health");
+                const d = await r.json();
+                if (r.ok && d.status === "UP") {
+                    st.style.color = "green";
+                    st.textContent = "Connected to backend. You can now login/register.";
+                } else {
+                    st.style.color = "red";
+                    st.textContent = "Server replied with status " + r.status + ".";
+                }
+            } catch (err) {
+                st.style.color = "red";
+                st.textContent = "Cannot reach that URL. Is the backend deployed and the URL correct?";
+            }
+        }
 
         function showForm(type) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -150,7 +211,7 @@
                     showMessage(data.error || 'Login failed', 'error');
                 }
             } catch (error) {
-                showMessage('Cannot connect to server. Is it running?', 'error');
+                showMessage(connError(), 'error');
             }
         }
 
@@ -180,7 +241,7 @@
                     showMessage(data.error || 'Registration failed', 'error');
                 }
             } catch (error) {
-                showMessage('Cannot connect to server. Is it running?', 'error');
+                showMessage(connError(), 'error');
             }
         }
 
