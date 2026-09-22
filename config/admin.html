@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sri Mart - Admin</title>
+<script src="/config/api-config.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f0f2f5}
 .header{background:#673ab7;color:white;padding:15px 30px;display:flex;justify-content:space-between;align-items:center}
@@ -30,7 +31,7 @@ button{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;background:
 </div>
 <script>
 // Fix: same-origin API base (was hardcoded http://localhost:8080).
-const API=window.location.origin;
+const API=(typeof sriApiBase === "function") ? sriApiBase() : window.location.origin;
 let token=localStorage.getItem('token');
 let user=JSON.parse(localStorage.getItem('user')||'null');
 if(!token||!user) window.location.href='/';

@@ -100,6 +100,25 @@ curl -X POST http://localhost:8080/api/v1/products -H "Content-Type: application
 
 Default accounts: `admin / admin123 (admin)`, `customer / customer123 (customer)`
 
+## Deploy (Vercel + Render)
+
+The C++ Drogon server **cannot run on Vercel** (no long-running processes),
+so the app deploys in two halves:
+
+1. **API on Render** — Dashboard: New -> Blueprint -> select this repo
+   (`render.yaml` creates the Docker web service + PostgreSQL and wires
+   `PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD` + `PORT`). Wait until
+   `GET https://<your-api>.onrender.com/api/v1/health` returns `{"status":"UP"}`.
+2. **UI on Vercel** — import the repo, Framework Preset `Other`, no build
+   command needed (`vercel.json` rewrites `/`, `/buyer`, `/seller`, `/admin`
+   to the static pages). Then point the UI at the API — either edit the one
+   line `window.SRI_API_BASE` in `config/api-config.js`, or in the browser
+   console run `localStorage.setItem("sri_api_base","https://<your-api>.onrender.com")`
+   and reload. Redeploy after editing `api-config.js`.
+
+If `SRI_API_BASE` is empty the pages use same-origin (local dev, where the
+C++ server serves them itself).
+
 ## Notes
 - Products are persisted in PostgreSQL `products` table (auto-created on startup).
 - Auth storage is in-memory with salted SHA-256 password hashes (`salt$hex`, 10k rounds via OpenSSL when available, legacy XOR accounts still verify). PostgreSQL + bcrypt migration is the next step.

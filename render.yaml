@@ -1,0 +1,39 @@
+# ============================================================
+# Render blueprint: Sri Mart API (Docker) + PostgreSQL.
+# Dashboard: New -> Blueprint -> select this repo.
+# The web service binds $PORT and exposes GET /api/v1/health.
+# ============================================================
+
+databases:
+  - name: sri-mart-db
+    plan: free
+
+services:
+  - type: web
+    name: srinivasan-mart-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: PGHOST
+        fromDatabase:
+          name: sri-mart-db
+          property: host
+      - key: PGPORT
+        fromDatabase:
+          name: sri-mart-db
+          property: port
+      - key: PGDATABASE
+        fromDatabase:
+          name: sri-mart-db
+          property: database
+      - key: PGUSER
+        fromDatabase:
+          name: sri-mart-db
+          property: user
+      - key: PGPASSWORD
+        fromDatabase:
+          name: sri-mart-db
+          property: password
+      - key: PORT
+        value: 8080

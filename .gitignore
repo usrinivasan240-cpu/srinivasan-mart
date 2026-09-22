@@ -29,3 +29,6 @@ Desktop.ini
 # Temporary files
 *.tmp
 *.log
+
+# Vercel CLI cache
+.vercel/
