@@ -24,15 +24,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Drogon from source (trantor ships as a submodule); all other
 # dependencies come from the apt packages above.
-RUN git clone --depth 1 --recurse-submodules \
+# NOTE: -j2 on purpose. Unbounded -j$(nproc) OOM-kills cc1plus on small
+# builders halfway through these heavy translation units.
+RUN echo "builder: $(nproc) cores, $(free -m | awk '/Mem:/{print $2}') MB RAM" \
+    && git clone --depth 1 --recurse-submodules \
         https://github.com/drogonframework/drogon.git /opt/drogon \
     && cmake -S /opt/drogon -B /opt/drogon/build \
         -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_TESTING=OFF \
         -DBUILD_EXAMPLES=OFF \
         -DBUILD_ORM=ON \
-    && cmake --build /opt/drogon/build -j"$(nproc)" \
+    && cmake --build /opt/drogon/build -j2 \
     && cmake --install /opt/drogon/build \
+    && test -f /usr/local/lib/cmake/Drogon/DrogonConfig.cmake \
+    && echo DROGON_CONFIG_OK \
     && rm -rf /opt/drogon
 
 WORKDIR /app
@@ -40,7 +45,7 @@ COPY . .
 
 # find_package(Drogon) resolves via /usr/local from `cmake --install` above.
 RUN cmake -B build -S . -DCMAKE_BUILD_TYPE=Release \
-    && cmake --build build -j"$(nproc)"
+    && cmake --build build -j2
 
 ENV PORT=8080
 EXPOSE 8080
