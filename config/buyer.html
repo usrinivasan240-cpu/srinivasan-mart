@@ -141,7 +141,7 @@ async function checkout(){
     const map={}; (products||[]).forEach(p=>map[p.id]=p);
     (cart||[]).forEach(it=>{
       const p=map[it.productId]||{name:'Item', price:0};
-      snapItems.push({name:p.name, price:p.price, qty:it.quantity});
+      snapItems.push({productId:it.productId, name:p.name, price:p.price, qty:it.quantity});
     });
   }catch(e){}
   const r=await fetch(API+'/api/v1/orders/checkout',{method:'POST',headers:{'Authorization':'Bearer '+token}});

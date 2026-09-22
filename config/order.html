@@ -22,7 +22,7 @@ th,td{padding:8px;border-bottom:1px solid #eee}th{background:#f7f7f7}
 .meta b{color:#333}
 .btnrow{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
 .btnrow button{flex:1;padding:12px;border:none;border-radius:6px;cursor:pointer;font-size:14px;min-width:140px}
-.btn-green{background:#4CAF50;color:white}.btn-orange{background:#ff9800;color:white}.btn-grey{background:#eee;color:#333}
+.btn-green{background:#4CAF50;color:white}.btn-orange{background:#ff9800;color:white}.btn-grey{background:#eee;color:#333}.btn-blue{background:#2196F3;color:white}
 .err{color:#c00;padding:20px}
 @media print{ .header button,.btnrow,.no-print{display:none !important} body{background:white} .card{box-shadow:none} }
 </style>
@@ -50,8 +50,15 @@ th,td{padding:8px;border-bottom:1px solid #eee}th{background:#f7f7f7}
     <div class="total" id="grandTotal"></div>
     <div class="btnrow">
       <button class="btn-green" onclick="goShop()">Continue Shopping</button>
+      <button class="btn-blue" id="reorderBtn" onclick="reorder()">↻ Buy Again</button>
+    </div>
+    <div class="btnrow">
       <button class="btn-orange" onclick="window.print()">Print Bill</button>
       <button class="btn-grey" onclick="askAssistant()">Need Help?</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn-grey" onclick="copyBill()">Copy Bill ID</button>
+      <button class="btn-grey" onclick="refreshStatus()">↻ Refresh Status</button>
     </div>
     <p class="no-print" style="font-size:12px;color:#888;margin-top:12px;">Free delivery over ₹499 · Easy 7-day returns with this bill</p>
   </div>
@@ -69,35 +76,65 @@ async function logout(){
   await fetch(API+'/api/v1/auth/logout',{method:'POST',headers:{'Authorization':'Bearer '+token}});
   localStorage.removeItem('token'); localStorage.removeItem('user'); window.location.href='/';
 }
+let currentBill=null, currentBillId=null, pollTimer=null;
+async function fetchBill(id){
+  try{
+    const r=await fetch(API+'/api/v1/orders/'+encodeURIComponent(id),{headers:{'Authorization':'Bearer '+token}});
+    const d=await r.json();
+    if(r.ok && !d.error) return d;
+  }catch(e){}
+  return null;
+}
+function deliveryBy(s){
+  try{
+    const d=new Date(String(s).replace(' ','T'));
+    d.setDate(d.getDate()+4);
+    return d.toDateString();
+  }catch(e){ return ''; }
+}
+function paintSteps(status){
+  const st=String(status||'created').toLowerCase();
+  ['stPlaced','stPaid','stShipped'].forEach(id=>document.getElementById(id).classList.remove('done'));
+  document.getElementById('stPlaced').classList.add('done');
+  if(st==='paid'||st==='shipped') document.getElementById('stPaid').classList.add('done');
+  if(st==='shipped') document.getElementById('stShipped').classList.add('done');
+  return st.charAt(0).toUpperCase()+st.slice(1);
+}
 async function load(){
   const id=new URLSearchParams(window.location.search).get('id');
   const meta=document.getElementById('billMeta');
   if(!id){ meta.innerHTML='<span class="err">No bill selected. Place an order first.</span>'; return; }
-  // 1. Authoritative bill from the server (total, status, date).
-  let bill=null;
-  try{
-    const r=await fetch(API+'/api/v1/orders/'+encodeURIComponent(id),{headers:{'Authorization':'Bearer '+token}});
-    const d=await r.json();
-    if(r.ok && !d.error) bill=d;
-  }catch(e){}
+  currentBillId=id;
+  const bill=await fetchBill(id);
   if(!bill){ meta.innerHTML='<span class="err">Could not load this bill. It may belong to another account.</span>'; return; }
-  // 2. Item lines snapshotted at checkout time (orders store totals, not lines).
-  let snap=null;
-  try{ snap=JSON.parse(localStorage.getItem('sri_last_bill')||'null'); }catch(e){}
-  const lines=(snap && snap.id===bill.id && Array.isArray(snap.items)) ? snap.items : [];
+  currentBill=bill;
+  renderBill(bill);
+  // Live status: refresh silently every 30s while visible.
+  if(!pollTimer){ pollTimer=setInterval(async ()=>{
+    if(document.visibilityState!=='visible' || !currentBillId) return;
+    const b=await fetchBill(currentBillId);
+    if(b){ currentBill=b; renderBill(b); }
+  }, 30000); }
+}
+function renderBill(bill){
+  const meta=document.getElementById('billMeta');
   document.getElementById('helloLine').textContent='Thanks '+user.username+'! Show this bill for returns.';
-  // progress steps
-  const st=(bill.status||'created').toLowerCase();
-  const mark=(id)=>document.getElementById(id).classList.add('done');
-  mark('stPlaced');
-  if(st==='paid'||st==='shipped') mark('stPaid');
-  if(st==='shipped') mark('stShipped');
+  const label=paintSteps(bill.status);
   meta.innerHTML='';
   const addRow=(k,v)=>{ const d=document.createElement('div'); const b=document.createElement('b'); b.textContent=k+': '; d.appendChild(b); d.appendChild(document.createTextNode(v)); meta.appendChild(d); };
   addRow('Bill ID', bill.id);
   addRow('Date', bill.created_at||'');
-  addRow('Status', st.charAt(0).toUpperCase()+st.slice(1));
+  // 2. Item lines snapshotted at checkout time (orders store totals, not lines).
+  let snap=null;
+  try{ snap=JSON.parse(localStorage.getItem('sri_last_bill')||'null'); }catch(e){}
+  const lines=(snap && snap.id===bill.id && Array.isArray(snap.items)) ? snap.items : [];
+  const srow=document.createElement('div');
+  const sb=document.createElement('b'); sb.textContent='Status: ';
+  const sv=document.createElement('span'); sv.textContent=label;
+  srow.appendChild(sb); srow.appendChild(sv); meta.appendChild(srow);
   addRow('Items', String(bill.itemCount));
+  const eta=deliveryBy(bill.created_at);
+  if(eta) addRow('Estimated delivery', eta);
   if(lines.length>0){
     const tbody=document.getElementById('itemRows'); tbody.innerHTML='';
     document.getElementById('itemTable').style.display='table';
@@ -112,6 +149,46 @@ async function load(){
     });
   }
   document.getElementById('grandTotal').textContent='Total: ₹'+Number(bill.total).toFixed(2);
+}
+async function refreshStatus(){
+  if(!currentBillId) return;
+  const b=await fetchBill(currentBillId);
+  if(b){ currentBill=b; renderBill(b); }
+  else alert('Could not refresh. Check your connection.');
+}
+function copyBill(){
+  const id=currentBill?currentBill.id:(new URLSearchParams(window.location.search).get('id')||'');
+  if(!id) return;
+  const fallback=()=>{ prompt('Copy your Bill ID:', id); };
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(id).then(()=>alert('Bill ID copied'), fallback); }
+  else fallback();
+}
+async function reorder(){
+  const btn=document.getElementById('reorderBtn');
+  btn.disabled=true; const old=btn.textContent; btn.textContent='Adding...';
+  try{
+    let snap=null;
+    try{ snap=JSON.parse(localStorage.getItem('sri_last_bill')||'null'); }catch(e){}
+    const items=(snap && snap.id===currentBillId && Array.isArray(snap.items)) ? snap.items : [];
+    if(items.length===0){ alert('No item details saved for this bill on this device.'); return; }
+    const pr=await fetch(API+'/api/v1/products'); const catalog=await pr.json();
+    let added=0;
+    for(const it of items){
+      let pid=it.productId||null;
+      if(!pid && it.name){
+        const q=String(it.name).toLowerCase();
+        const hit=(catalog||[]).find(p=>String(p.name).toLowerCase()===q)
+          || (catalog||[]).find(p=>String(p.name).toLowerCase().indexOf(q.split(' ')[0])!==-1);
+        if(hit) pid=hit.id;
+      }
+      if(!pid) continue;
+      const r=await fetch(API+'/api/v1/cart',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({productId:pid, quantity:it.qty||1})});
+      if(r.ok) added++;
+    }
+    if(added>0) window.location.href='/buyer';
+    else alert('Could not re-add items (they may be out of stock or removed).');
+  }catch(e){ alert('Reorder failed. Is the server running?'); }
+  finally{ btn.disabled=false; btn.textContent=old; }
 }
 load();
 </script>
