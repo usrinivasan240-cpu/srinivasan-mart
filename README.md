@@ -103,7 +103,9 @@ Default accounts: `admin / admin123 (admin)`, `customer / customer123 (customer)
 ## Notes
 - Products are persisted in PostgreSQL `products` table (auto-created on startup).
 - Auth storage is in-memory with salted SHA-256 password hashes (`salt$hex`, 10k rounds via OpenSSL when available, legacy XOR accounts still verify). PostgreSQL + bcrypt migration is the next step.
-- DB connection reads `PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD` env vars (see `.env.example`); HTTP port reads `PORT` (default 8080).
+- DB connection reads `PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD` env vars (see `.env.example`); HTTP port reads `PORT` (default 8080). All libpq use is serialized on a mutex; checkout reserves stock in one transaction.
+- Tokens expire after 24h; login is rate-limited (5 fails / 10 min -> 5-min lockout, HTTP 429). Usernames (`3-32`, alnum/`_`-), emails, and field lengths are validated server-side.
+- `start.bat` / `dev.bat` / `stop.bat` are portable (relative paths, `PG_CTL`/`PGDATA_DIR`/`VCPKG_TOOLCHAIN` env overrides) — no hardcoded user folders.
 - `POST/PUT/DELETE /api/v1/products` require seller/admin Bearer token; `GET /api/v1/auth/users` is admin-only; self-register can only create `customer`/`seller` (never `admin`).
 - `GET /api/v1/products` and `/products/search` support `?limit=&offset=` (search is case-insensitive `ILIKE` in SQL); checkout runs in a Postgres transaction and decrements stock atomically.
 - Frontend uses same-origin API (`window.location.origin`) + auth headers on seller writes + HTML escaping.

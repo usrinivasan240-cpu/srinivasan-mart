@@ -14,8 +14,8 @@
 #include <sstream>
 #include <chrono>
 #include <ctime>
+#include <utility>
 #include <vector>
-#include <libpq-fe.h>
 
 std::vector<Order> &OrderService::getStorage()
 {
@@ -75,61 +75,21 @@ Json::Value OrderService::checkout(const std::string &userId)
         return error;
     }
 
-    // Transactional checkout fix: previously totals were computed with no
-    // stock change. Now BEGIN, verify + decrement each line atomically,
-    // ROLLBACK on any failure, COMMIT on success.
-    PGconn *conn = ProductService::getConnection();
-    if (conn == nullptr)
-    {
-        Json::Value error;
-        error["error"] = "Database connection failed";
-        return error;
-    }
-    auto execOk = [&](const char *sql) -> bool {
-        PGresult *r = PQexec(conn, sql);
-        bool ok = (PQresultStatus(r) == PGRES_COMMAND_OK);
-        PQclear(r);
-        return ok;
-    };
-    if (!execOk("BEGIN"))
-    {
-        Json::Value error;
-        error["error"] = "Checkout transaction failed to start";
-        return error;
-    }
-
-    double total = 0.0;
-    struct Line { std::string pid; int qty; double price; };
-    std::vector<Line> lines;
+    // All stock work happens inside ProductService::checkoutItems under one
+    // lock + one Postgres transaction (all-or-nothing). Cart is cleared only
+    // after it succeeds.
+    std::vector<std::pair<std::string, int>> items;
     for (auto &line : cart)
     {
-        std::string pid = line["productId"].asString();
-        int qty = line.get("quantity", 1).asInt();
-        auto product = ProductService::getProductById(pid);
-        if (product.isNull())
-        {
-            execOk("ROLLBACK");
-            Json::Value error;
-            error["error"] = "Product not found: " + pid;
-            return error;
-        }
-        double price = product.get("price", 0.0).asDouble();
-        std::string err;
-        if (!ProductService::decrementStock(pid, qty, err))
-        {
-            execOk("ROLLBACK");
-            Json::Value error;
-            error["error"] = err;
-            return error;
-        }
-        total += price * qty;
-        lines.push_back({pid, qty, price});
+        items.emplace_back(line["productId"].asString(),
+                           line.get("quantity", 1).asInt());
     }
-    if (!execOk("COMMIT"))
+    double total = 0.0;
+    std::string err;
+    if (!ProductService::checkoutItems(items, total, err))
     {
-        execOk("ROLLBACK");
         Json::Value error;
-        error["error"] = "Checkout commit failed";
+        error["error"] = err;
         return error;
     }
 
@@ -139,7 +99,7 @@ Json::Value OrderService::checkout(const std::string &userId)
     order.userId = userId;
     order.total = total;
     order.status = "created";
-    order.itemCount = (int)lines.size();
+    order.itemCount = (int)items.size();
     order.created_at = sri_nowStamp();
     getStorage().push_back(order);
 

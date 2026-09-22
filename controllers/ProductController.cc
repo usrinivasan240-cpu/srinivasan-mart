@@ -84,6 +84,12 @@ void ProductController::initRoutes()
         &ProductController::createProduct,
         {Post});
 
+    // GET /api/v1/products/search -> search/filter.
+    // Registered BEFORE /products/{id} so "search" is never captured as an id.
+    app().registerHandler("/api/v1/products/search",
+        &ProductController::searchProducts,
+        {Get});
+
     // GET /api/v1/products/{id} -> returns one product
     app().registerHandler("/api/v1/products/{id}",
         &ProductController::getProductById,
@@ -98,11 +104,6 @@ void ProductController::initRoutes()
     app().registerHandler("/api/v1/products/{id}",
         &ProductController::deleteProduct,
         {Delete});
-
-    // GET /api/v1/products/search?q=&minPrice=&maxPrice= -> search/filter
-    app().registerHandler("/api/v1/products/search",
-        &ProductController::searchProducts,
-        {Get});
 }
 
 // Fetches products with pagination: ?limit=&offset= (defaults 100/0, max 500).

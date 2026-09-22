@@ -61,6 +61,11 @@ Json::Value ReviewService::addReview(const std::string &productId, const std::st
         Json::Value e; e["error"] = "Rating must be 1-5";
         return e;
     }
+    if (comment.size() > 1000)
+    {
+        Json::Value e; e["error"] = "Comment too long (max 1000 chars)";
+        return e;
+    }
     if (ProductService::getProductById(productId).isNull())
     {
         Json::Value e; e["error"] = "Product not found";

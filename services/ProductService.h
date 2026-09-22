@@ -12,6 +12,10 @@
 #include <drogon/drogon.h>
 #include <json/json.h>
 #include <libpq-fe.h>
+#include <mutex>
+#include <string>
+#include <utility>
+#include <vector>
 
 // This class handles all product operations (CRUD) using PostgreSQL database directly via libpq.
 class ProductService
@@ -52,6 +56,16 @@ public:
 
     // Returns total product count (for admin/seller stats, avoids LIMIT cap).
     static int countProducts();
+
+    // Recursive mutex serializing all libpq use on the shared connection.
+    // Recursive so helpers (update->get, checkout->get/decrement) can nest.
+    static std::recursive_mutex &dbMutex();
+
+    // All-or-nothing stock reservation for checkout: verifies each
+    // (productId, qty), decrements stock atomically, sums price*qty into
+    // total. Returns false with err set on any failure (nothing decremented).
+    static bool checkoutItems(const std::vector<std::pair<std::string, int>> &items,
+                              double &total, std::string &err);
 
 private:
 

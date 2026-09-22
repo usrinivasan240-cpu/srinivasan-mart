@@ -12,9 +12,18 @@
 #include <sstream>
 #include <iostream>
 #include <cstdlib>
+#include <mutex>
 
 // The PostgreSQL connection (shared across all operations).
+// libpq connections are NOT thread-safe for concurrent use, so every
+// public method locks dbMutex() first (recursive: helpers may nest).
 static PGconn *g_conn = nullptr;
+
+std::recursive_mutex &ProductService::dbMutex()
+{
+    static std::recursive_mutex mtx;
+    return mtx;
+}
 
 // Builds a libpq conninfo string from env vars with safe defaults.
 // PGHOST (localhost), PGPORT (5433), PGDATABASE (sri_mart),
@@ -40,6 +49,7 @@ static std::string sri_conninfo()
 // Creates a new connection if one doesn't exist.
 PGconn *ProductService::getConnection()
 {
+    std::lock_guard<std::recursive_mutex> lock(dbMutex());
     if (g_conn == nullptr || PQstatus(g_conn) != CONNECTION_OK)
     {
         if (g_conn != nullptr)
@@ -96,6 +106,7 @@ std::string ProductService::generateUUID()
 // Creates the products table in PostgreSQL if it doesn't exist.
 bool ProductService::initializeDatabase()
 {
+    std::lock_guard<std::recursive_mutex> lock(dbMutex());
     PGconn *conn = getConnection();
     if (conn == nullptr)
     {
@@ -129,6 +140,7 @@ bool ProductService::initializeDatabase()
 // Returns products from PostgreSQL with LIMIT/OFFSET pagination.
 Json::Value ProductService::getAllProducts(int limit, int offset)
 {
+    std::lock_guard<std::recursive_mutex> lock(dbMutex());
     if (limit <= 0) limit = 100;
     if (limit > 500) limit = 500;
     if (offset < 0) offset = 0;
@@ -180,6 +192,7 @@ Json::Value ProductService::getAllProducts(int limit, int offset)
 // Finds one product by its ID in the PostgreSQL database.
 Json::Value ProductService::getProductById(const std::string &id)
 {
+    std::lock_guard<std::recursive_mutex> lock(dbMutex());
     PGconn *conn = getConnection();
     if (conn == nullptr)
     {
@@ -230,6 +243,7 @@ Json::Value ProductService::getProductById(const std::string &id)
 // Creates a new product in the PostgreSQL database.
 Json::Value ProductService::createProduct(const Json::Value &productData)
 {
+    std::lock_guard<std::recursive_mutex> lock(dbMutex());
     PGconn *conn = getConnection();
     if (conn == nullptr)
     {
@@ -260,8 +274,15 @@ Json::Value ProductService::createProduct(const Json::Value &productData)
         return error;
     }
 
-    std::string id = generateUUID();
     std::string description = productData.get("description", "").asString();
+    if (description.size() > 5000)
+    {
+        Json::Value error;
+        error["error"] = "Description too long (max 5000 chars)";
+        return error;
+    }
+
+    std::string id = generateUUID();
     std::string price = std::to_string(priceVal);
     std::string stock = std::to_string(stockVal);
 
@@ -288,6 +309,7 @@ Json::Value ProductService::createProduct(const Json::Value &productData)
 // Updates an existing product in the PostgreSQL database.
 Json::Value ProductService::updateProduct(const std::string &id, const Json::Value &productData)
 {
+    std::lock_guard<std::recursive_mutex> lock(dbMutex());
     PGconn *conn = getConnection();
     if (conn == nullptr)
     {
@@ -321,6 +343,12 @@ Json::Value ProductService::updateProduct(const std::string &id, const Json::Val
         error["error"] = "Price and stock must be >= 0";
         return error;
     }
+    if (description.size() > 5000)
+    {
+        Json::Value error;
+        error["error"] = "Description too long (max 5000 chars)";
+        return error;
+    }
     std::string price = std::to_string(priceVal);
     std::string stock = std::to_string(stockVal);
 
@@ -346,6 +374,7 @@ Json::Value ProductService::updateProduct(const std::string &id, const Json::Val
 // Deletes a product from the PostgreSQL database.
 bool ProductService::deleteProduct(const std::string &id)
 {
+    std::lock_guard<std::recursive_mutex> lock(dbMutex());
     PGconn *conn = getConnection();
     if (conn == nullptr)
     {
@@ -374,6 +403,7 @@ bool ProductService::deleteProduct(const std::string &id)
 Json::Value ProductService::searchProducts(const std::string &query, double minPrice, double maxPrice,
                                            int limit, int offset)
 {
+    std::lock_guard<std::recursive_mutex> lock(dbMutex());
     if (limit <= 0) limit = 100;
     if (limit > 500) limit = 500;
     if (offset < 0) offset = 0;
@@ -423,6 +453,7 @@ Json::Value ProductService::searchProducts(const std::string &query, double minP
 // Returns SELECT COUNT(*) for stats endpoints.
 int ProductService::countProducts()
 {
+    std::lock_guard<std::recursive_mutex> lock(dbMutex());
     PGconn *conn = getConnection();
     if (conn == nullptr) return 0;
     PGresult *res = PQexec(conn, "SELECT COUNT(*) FROM products");
@@ -441,10 +472,13 @@ int ProductService::countProducts()
 // caller-managed transaction (checkout) or standalone.
 bool ProductService::decrementStock(const std::string &id, int qty, std::string &err)
 {
-    if (qty <= 0) { err = "Quantity must be >= 1"; return false; }
+    std::lock_guard<std::recursive_mutex> lock(dbMutex());
+    if (qty <= 0 || qty > 99) { err = "Quantity must be 1-99"; return false; }
     PGconn *conn = getConnection();
     if (conn == nullptr) { err = "Database connection failed"; return false; }
-    const char *params[2] = {id.c_str(), std::to_string(qty).c_str()};
+    // NOTE: qtyS must outlive PQexecParams (previous code bound a temporary).
+    std::string qtyS = std::to_string(qty);
+    const char *params[2] = {id.c_str(), qtyS.c_str()};
     // Single-statement atomic guard: only decrements when stock >= qty.
     PGresult *res = PQexecParams(conn,
         "UPDATE products SET stock = stock - $2::integer, updated_at = CURRENT_TIMESTAMP "
@@ -465,5 +499,39 @@ bool ProductService::decrementStock(const std::string &id, int qty, std::string 
         err = p.isNull() ? "Product not found" : "Insufficient stock";
         return false;
     }
+    return true;
+}
+
+// All-or-nothing checkout reservation under a single lock + transaction.
+// Nested getProductById/decrementStock calls re-lock safely (recursive).
+bool ProductService::checkoutItems(const std::vector<std::pair<std::string, int>> &items,
+                                  double &total, std::string &err)
+{
+    std::lock_guard<std::recursive_mutex> lock(dbMutex());
+    total = 0.0;
+    if (items.empty()) { err = "Cart is empty"; return false; }
+    if (items.size() > 100) { err = "Too many cart lines (max 100)"; return false; }
+    PGconn *conn = getConnection();
+    if (conn == nullptr) { err = "Database connection failed"; return false; }
+    auto execOk = [&](const char *sql) -> bool {
+        PGresult *r = PQexec(conn, sql);
+        bool ok = (r != nullptr && PQresultStatus(r) == PGRES_COMMAND_OK);
+        if (r) PQclear(r);
+        return ok;
+    };
+    if (!execOk("BEGIN")) { err = "Checkout transaction failed to start"; return false; }
+    for (auto &it : items)
+    {
+        const std::string &pid = it.first;
+        int qty = it.second;
+        if (qty <= 0 || qty > 99) { execOk("ROLLBACK"); err = "Invalid quantity"; return false; }
+        Json::Value product = getProductById(pid);
+        if (product.isNull()) { execOk("ROLLBACK"); err = "Product not found: " + pid; return false; }
+        double price = product.get("price", 0.0).asDouble();
+        std::string derr;
+        if (!decrementStock(pid, qty, derr)) { execOk("ROLLBACK"); err = derr; return false; }
+        total += price * qty;
+    }
+    if (!execOk("COMMIT")) { execOk("ROLLBACK"); err = "Checkout commit failed"; return false; }
     return true;
 }

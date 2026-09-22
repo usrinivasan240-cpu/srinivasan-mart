@@ -12,6 +12,8 @@
 #include <drogon/drogon.h>
 #include <json/json.h>
 #include "../models/User.h"
+#include <chrono>
+#include <map>
 #include <vector>
 #include <mutex>
 
@@ -62,6 +64,12 @@ private:
 
     // Returns the in-memory token storage (token -> user_id mapping).
     static std::map<std::string, std::string> &getTokenStorage();
+
+    // Token expiry times (token -> absolute expiry). 24h TTL.
+    // Caller must hold getMutex().
+    static constexpr int kTokenTtlHours = 24;
+    static std::map<std::string, std::chrono::steady_clock::time_point> &getTokenExpiry();
+    static void purgeExpiredTokens(); // caller holds lock
 
     // Returns a mutex for thread safety.
     static std::mutex &getMutex();

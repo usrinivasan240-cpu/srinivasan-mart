@@ -8,6 +8,7 @@
 // ============================================================
 
 #include "AuthService.h"
+#include <cctype>
 #include <random>
 #include <sstream>
 #include <iomanip>
@@ -199,6 +200,71 @@ std::map<std::string, std::string> &AuthService::getTokenStorage()
     return tokens;
 }
 
+std::map<std::string, std::chrono::steady_clock::time_point> &AuthService::getTokenExpiry()
+{
+    static std::map<std::string, std::chrono::steady_clock::time_point> expiry;
+    return expiry;
+}
+
+// Erases all expired tokens from both maps. Caller must hold getMutex().
+void AuthService::purgeExpiredTokens()
+{
+    auto now = std::chrono::steady_clock::now();
+    auto &tokens = getTokenStorage();
+    auto &expiry = getTokenExpiry();
+    for (auto it = expiry.begin(); it != expiry.end();)
+    {
+        if (now >= it->second)
+        {
+            tokens.erase(it->first);
+            it = expiry.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
+// ---- login rate limiting (file-local): 5 fails / 10 min -> 5 min lock ----
+struct SriLoginAttempt
+{
+    int fails = 0;
+    std::chrono::steady_clock::time_point windowStart = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point lockUntil{};
+    bool locked = false;
+};
+
+static std::map<std::string, SriLoginAttempt> &sri_loginAttempts()
+{
+    static std::map<std::string, SriLoginAttempt> attempts;
+    return attempts;
+}
+
+// ---- input validation (file-local, no <regex> dependency) ----
+static bool sri_validUsername(const std::string &u)
+{
+    if (u.size() < 3 || u.size() > 32) return false;
+    for (char c : u)
+    {
+        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '-')
+            return false;
+    }
+    return true;
+}
+
+static bool sri_validEmail(const std::string &e)
+{
+    if (e.size() < 5 || e.size() > 254) return false;
+    if (e.find(' ') != std::string::npos) return false;
+    auto at = e.find('@');
+    if (at == std::string::npos || at == 0 || at == e.size() - 1) return false;
+    if (e.find('@', at + 1) != std::string::npos) return false;
+    auto dot = e.find('.', at);
+    if (dot == std::string::npos || dot == e.size() - 1) return false;
+    return true;
+}
+
 // Returns a mutex to keep authentication operations safe.
 std::mutex &AuthService::getMutex()
 {
@@ -224,6 +290,25 @@ Json::Value AuthService::registerUser(const Json::Value &userData)
     std::string email = userData["email"].asString();
     std::string password = userData["password"].asString();
 
+    if (!sri_validUsername(username))
+    {
+        Json::Value error;
+        error["error"] = "Username must be 3-32 chars (letters, digits, _ , -)";
+        return error;
+    }
+    if (!sri_validEmail(email))
+    {
+        Json::Value error;
+        error["error"] = "Invalid email address";
+        return error;
+    }
+    if (password.size() < 4 || password.size() > 128)
+    {
+        Json::Value error;
+        error["error"] = "Password must be 4-128 characters";
+        return error;
+    }
+
     // Check if username already exists
     for (auto &user : getUserStorage())
     {
@@ -248,13 +333,6 @@ Json::Value AuthService::registerUser(const Json::Value &userData)
     if (requestedRole == "seller") role = "seller";
     // "admin" or anything else falls back to customer.
 
-    if (password.size() < 4)
-    {
-        Json::Value error;
-        error["error"] = "Password must be at least 4 characters";
-        return error;
-    }
-
     // Create new user
     User user;
     user.id = generateUUID();
@@ -273,26 +351,64 @@ Json::Value AuthService::registerUser(const Json::Value &userData)
 }
 
 // Logs in a user with username and password.
-// Returns a token on success, or an error.
+// Returns a 24h token on success, or an error.
+// Rate limit: 5 failures per 10-min window locks the name for 5 min (429).
 Json::Value AuthService::loginUser(const std::string &username, const std::string &password)
 {
+    using clock = std::chrono::steady_clock;
     std::lock_guard<std::mutex> lock(getMutex());
+
+    auto now = clock::now();
+    auto &att = sri_loginAttempts()[username];
+    if (att.locked)
+    {
+        if (now < att.lockUntil)
+        {
+            auto waitSecs = std::chrono::duration_cast<std::chrono::seconds>(
+                att.lockUntil - now).count();
+            Json::Value error;
+            error["error"] = "Too many login attempts, try again later";
+            error["locked"] = true;
+            error["retry_after_seconds"] = static_cast<int>(waitSecs);
+            return error;
+        }
+        att = SriLoginAttempt(); // lock expired, reset
+    }
+    else if (now - att.windowStart > std::chrono::minutes(10))
+    {
+        att.fails = 0;
+        att.windowStart = now;
+    }
 
     for (auto &user : getUserStorage())
     {
         if (user.username == username && verifyPassword(user.password, password))
         {
-            // Generate token and store it
+            sri_loginAttempts().erase(username);
+            // Generate token with 24h expiry
             std::string token = generateToken();
             getTokenStorage()[token] = user.id;
+            getTokenExpiry()[token] = now + std::chrono::hours(kTokenTtlHours);
 
             Json::Value result;
             result["token"] = token;
             result["user"] = user.toJson();
+            result["expires_in_hours"] = kTokenTtlHours;
             return result;
         }
     }
 
+    att.fails++;
+    if (att.fails >= 5)
+    {
+        att.locked = true;
+        att.lockUntil = now + std::chrono::minutes(5);
+        Json::Value error;
+        error["error"] = "Too many login attempts, try again in 5 minutes";
+        error["locked"] = true;
+        error["retry_after_seconds"] = 300;
+        return error;
+    }
     Json::Value error;
     error["error"] = "Invalid username or password";
     return error;
@@ -303,6 +419,7 @@ Json::Value AuthService::loginUser(const std::string &username, const std::strin
 Json::Value AuthService::validateToken(const std::string &token)
 {
     std::lock_guard<std::mutex> lock(getMutex());
+    purgeExpiredTokens();
 
     auto &tokens = getTokenStorage();
     if (tokens.find(token) != tokens.end())
@@ -350,7 +467,7 @@ Json::Value AuthService::getUserById(const std::string &id)
     return error;
 }
 
-// Logs out a token by erasing it from token storage.
+// Logs out a token by erasing it from token + expiry storage.
 bool AuthService::logoutToken(const std::string &token)
 {
     std::lock_guard<std::mutex> lock(getMutex());
@@ -359,15 +476,17 @@ bool AuthService::logoutToken(const std::string &token)
     if (it != tokens.end())
     {
         tokens.erase(it);
+        getTokenExpiry().erase(token);
         return true;
     }
     return false;
 }
 
-// Returns user_id for a token, or empty string if invalid.
+// Returns user_id for a token, or empty string if invalid/expired.
 std::string AuthService::getUserIdFromToken(const std::string &token)
 {
     std::lock_guard<std::mutex> lock(getMutex());
+    purgeExpiredTokens();
     auto &tokens = getTokenStorage();
     auto it = tokens.find(token);
     if (it != tokens.end())
@@ -377,10 +496,11 @@ std::string AuthService::getUserIdFromToken(const std::string &token)
     return "";
 }
 
-// Returns role for a token, or "" if invalid. Used for seller/admin gates.
+// Returns role for a token, or "" if invalid/expired. Used for seller/admin gates.
 std::string AuthService::getRoleFromToken(const std::string &token)
 {
     std::lock_guard<std::mutex> lock(getMutex());
+    purgeExpiredTokens();
     auto &tokens = getTokenStorage();
     auto it = tokens.find(token);
     if (it == tokens.end()) return "";
