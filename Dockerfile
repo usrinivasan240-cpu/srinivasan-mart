@@ -2,7 +2,9 @@
 # Sri Mart backend — C++20 + Drogon + libpq (PostgreSQL).
 # Used by Render/Fly/etc. Vercel cannot run this server, so the
 # static UI (vercel.json) goes to Vercel and this image runs the API.
-# Drogan is built via vcpkg; PORT and PG* come from the environment.
+# Drogon is built from source against Ubuntu system libs (fast);
+# vcpkg is deliberately NOT used (too slow for hosted builds).
+# PORT and PG* come from the environment.
 # ============================================================
 
 FROM ubuntu:24.04
@@ -12,21 +14,32 @@ ENV DEBIAN_FRONTEND=noninteractive
 # (/usr/include/postgresql) without touching CMakeLists.txt.
 ENV CPATH=/usr/include/postgresql
 
+# ca-certificates is REQUIRED: without it, git cannot verify TLS
+# (github.com clone fails with "server certificate verification failed").
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake git curl zip unzip tar pkg-config \
+    build-essential cmake git pkg-config ca-certificates \
     libssl-dev libpq-dev zlib1g-dev libjsoncpp-dev uuid-dev \
+    libc-ares-dev libbrotli-dev \
     && rm -rf /var/lib/apt/lists
 
-# vcpkg provides Drogon + its dependency tree.
-RUN git clone --depth 1 https://github.com/microsoft/vcpkg.git /opt/vcpkg \
-    && /opt/vcpkg/bootstrap-vcpkg.sh
-RUN /opt/vcpkg/vcpkg install drogon
+# Drogon from source (trantor ships as a submodule); all other
+# dependencies come from the apt packages above.
+RUN git clone --depth 1 --recurse-submodules \
+        https://github.com/drogonframework/drogon.git /opt/drogon \
+    && cmake -S /opt/drogon -B /opt/drogon/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_TESTING=OFF \
+        -DBUILD_EXAMPLES=OFF \
+        -DBUILD_ORM=ON \
+    && cmake --build /opt/drogon/build -j"$(nproc)" \
+    && cmake --install /opt/drogon/build \
+    && rm -rf /opt/drogon
 
 WORKDIR /app
 COPY . .
 
-RUN cmake -B build -S . \
-    -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
+# find_package(Drogon) resolves via /usr/local from `cmake --install` above.
+RUN cmake -B build -S . -DCMAKE_BUILD_TYPE=Release \
     && cmake --build build -j"$(nproc)"
 
 ENV PORT=8080
