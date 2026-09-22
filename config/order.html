@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sri Mart - Order Placed</title>
+<script src="/config/api-config.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f0f2f5}
+.header{background:#4CAF50;color:white;padding:15px 30px;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:22px}.header button{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;background:white;color:#4CAF50;margin-left:10px}
+.container{max-width:640px;margin:20px auto;padding:0 20px}
+.card{background:white;border-radius:10px;padding:24px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:15px;text-align:center}
+.check{width:64px;height:64px;border-radius:50%;background:#4CAF50;color:white;font-size:34px;line-height:64px;margin:0 auto 12px}
+.steps{display:flex;margin:18px 0;}
+.step{flex:1;text-align:center;font-size:12px;color:#aaa;position:relative}
+.step .dot{width:22px;height:22px;border-radius:50%;background:#ddd;color:white;font-size:12px;line-height:22px;margin:0 auto 4px}
+.step.done{color:#4CAF50}.step.done .dot{background:#4CAF50}
+table{width:100%;border-collapse:collapse;margin-top:10px;text-align:left;font-size:14px}
+th,td{padding:8px;border-bottom:1px solid #eee}th{background:#f7f7f7}
+.total{font-size:18px;font-weight:bold;text-align:right;margin-top:10px}
+.meta{text-align:left;font-size:13px;color:#555;background:#f9f9f9;border-radius:8px;padding:12px;margin-top:12px}
+.meta b{color:#333}
+.btnrow{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+.btnrow button{flex:1;padding:12px;border:none;border-radius:6px;cursor:pointer;font-size:14px;min-width:140px}
+.btn-green{background:#4CAF50;color:white}.btn-orange{background:#ff9800;color:white}.btn-grey{background:#eee;color:#333}
+.err{color:#c00;padding:20px}
+@media print{ .header button,.btnrow,.no-print{display:none !important} body{background:white} .card{box-shadow:none} }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🛒 Sri Mart</h1>
+  <div><span id="userInfo" style="font-size:14px"></span><button onclick="goShop()">Continue Shopping</button><button onclick="logout()">Logout</button></div>
+</div>
+<div class="container">
+  <div class="card" id="billCard">
+    <div class="check">✓</div>
+    <h2>Order placed, thank you!</h2>
+    <p id="helloLine" style="color:#666;margin-top:6px;">Your bill is ready below.</p>
+    <div class="steps" id="steps">
+      <div class="step" id="stPlaced"><div class="dot">1</div>Placed</div>
+      <div class="step" id="stPaid"><div class="dot">2</div>Paid</div>
+      <div class="step" id="stShipped"><div class="dot">3</div>Shipped</div>
+    </div>
+    <div class="meta" id="billMeta">Loading your bill...</div>
+    <table id="itemTable" style="display:none">
+      <thead><tr><th>Item</th><th>Qty</th><th style="text-align:right">Amount</th></tr></thead>
+      <tbody id="itemRows"></tbody>
+    </table>
+    <div class="total" id="grandTotal"></div>
+    <div class="btnrow">
+      <button class="btn-green" onclick="goShop()">Continue Shopping</button>
+      <button class="btn-orange" onclick="window.print()">Print Bill</button>
+      <button class="btn-grey" onclick="askAssistant()">Need Help?</button>
+    </div>
+    <p class="no-print" style="font-size:12px;color:#888;margin-top:12px;">Free delivery over ₹499 · Easy 7-day returns with this bill</p>
+  </div>
+</div>
+<script>
+const API=(typeof sriApiBase === "function") ? sriApiBase() : window.location.origin;
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+let token=localStorage.getItem('token');
+let user=JSON.parse(localStorage.getItem('user')||'null');
+if(!token || !user){ window.location.href='/'; }
+document.getElementById('userInfo').textContent = user ? user.username : '';
+function goShop(){ window.location.href='/buyer'; }
+function askAssistant(){ window.location.href='/buyer#chat'; }
+async function logout(){
+  await fetch(API+'/api/v1/auth/logout',{method:'POST',headers:{'Authorization':'Bearer '+token}});
+  localStorage.removeItem('token'); localStorage.removeItem('user'); window.location.href='/';
+}
+async function load(){
+  const id=new URLSearchParams(window.location.search).get('id');
+  const meta=document.getElementById('billMeta');
+  if(!id){ meta.innerHTML='<span class="err">No bill selected. Place an order first.</span>'; return; }
+  // 1. Authoritative bill from the server (total, status, date).
+  let bill=null;
+  try{
+    const r=await fetch(API+'/api/v1/orders/'+encodeURIComponent(id),{headers:{'Authorization':'Bearer '+token}});
+    const d=await r.json();
+    if(r.ok && !d.error) bill=d;
+  }catch(e){}
+  if(!bill){ meta.innerHTML='<span class="err">Could not load this bill. It may belong to another account.</span>'; return; }
+  // 2. Item lines snapshotted at checkout time (orders store totals, not lines).
+  let snap=null;
+  try{ snap=JSON.parse(localStorage.getItem('sri_last_bill')||'null'); }catch(e){}
+  const lines=(snap && snap.id===bill.id && Array.isArray(snap.items)) ? snap.items : [];
+  document.getElementById('helloLine').textContent='Thanks '+user.username+'! Show this bill for returns.';
+  // progress steps
+  const st=(bill.status||'created').toLowerCase();
+  const mark=(id)=>document.getElementById(id).classList.add('done');
+  mark('stPlaced');
+  if(st==='paid'||st==='shipped') mark('stPaid');
+  if(st==='shipped') mark('stShipped');
+  meta.innerHTML='';
+  const addRow=(k,v)=>{ const d=document.createElement('div'); const b=document.createElement('b'); b.textContent=k+': '; d.appendChild(b); d.appendChild(document.createTextNode(v)); meta.appendChild(d); };
+  addRow('Bill ID', bill.id);
+  addRow('Date', bill.created_at||'');
+  addRow('Status', st.charAt(0).toUpperCase()+st.slice(1));
+  addRow('Items', String(bill.itemCount));
+  if(lines.length>0){
+    const tbody=document.getElementById('itemRows'); tbody.innerHTML='';
+    document.getElementById('itemTable').style.display='table';
+    lines.forEach(it=>{
+      const tr=document.createElement('tr');
+      const tdN=document.createElement('td'); tdN.textContent=it.name;
+      const tdQ=document.createElement('td'); tdQ.textContent='x'+it.qty;
+      const tdA=document.createElement('td'); tdA.style.textAlign='right';
+      tdA.textContent='₹'+(Number(it.price)*Number(it.qty)).toFixed(2);
+      tr.appendChild(tdN); tr.appendChild(tdQ); tr.appendChild(tdA);
+      tbody.appendChild(tr);
+    });
+  }
+  document.getElementById('grandTotal').textContent='Total: ₹'+Number(bill.total).toFixed(2);
+}
+load();
+</script>
+</body>
+</html>

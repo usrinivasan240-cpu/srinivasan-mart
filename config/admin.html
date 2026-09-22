@@ -7,31 +7,52 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f0f2f5}
 .header{background:#673ab7;color:white;padding:15px 30px;display:flex;justify-content:space-between;align-items:center}
-.container{max-width:900px;margin:20px auto;padding:20px}
+.header h1{font-size:22px}.header button{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;background:white;color:#673ab7;margin-left:10px}
+.container{max-width:1000px;margin:20px auto;padding:0 20px}
 .card{background:white;border-radius:8px;padding:20px;box-shadow:0 2px 6px rgba(0,0,0,.1);margin-bottom:15px}
-button{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;background:#673ab7;color:white}
+.card h3{margin-bottom:12px}
+.stats{display:flex;gap:15px;margin-bottom:15px;flex-wrap:wrap}
+.stat{flex:1;min-width:160px;background:white;padding:18px;border-radius:8px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.1)}
+.stat h2{font-size:28px;color:#673ab7}
+.stat div{font-size:13px;color:#666;margin-top:4px}
+button.action{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;background:#673ab7;color:white}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:9px 8px;border-bottom:1px solid #eee;text-align:left}
+th{background:#f3effc;color:#444}
+tr:hover td{background:#faf8ff}
+.role{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;color:white}
+.role-admin{background:#673ab7}.role-seller{background:#ff9800}.role-customer{background:#4CAF50}
+.stock-low{color:#c00;font-weight:bold}
+.empty{color:#888;padding:10px 0}
 </style>
 </head>
 <body>
-<div class="header"><h1>🛡️ Sri Mart — Admin</h1><div><span id="userInfo"></span><button onclick="logout()">Logout</button></div></div>
+<div class="header"><h1>🛡️ Sri Mart — Admin</h1><div><span id="userInfo" style="font-size:14px"></span><button onclick="logout()">Logout</button></div></div>
 <div class="container">
-  <div class="card">
-    <h3>Admin Stats — Lively from DB + In-Memory</h3>
-    <p>Users: <b id="userCount">-</b> | Products (PostgreSQL): <b id="prodCount">-</b></p>
-    <button onclick="loadStats()">Refresh</button>
+  <div class="stats">
+    <div class="stat"><h2 id="userCount">-</h2><div>Registered users</div></div>
+    <div class="stat"><h2 id="prodCount">-</h2><div>Products live</div></div>
+    <div class="stat"><h2>9–9</h2><div>Open daily, 9am–9pm</div></div>
   </div>
   <div class="card">
-    <h3>All Users (<code>GET /api/v1/auth/users</code>)</h3>
-    <pre id="users" style="background:#f5f5f5;padding:10px;border-radius:5px;overflow:auto;max-height:300px"></pre>
+    <h3>All Users</h3>
+    <div style="overflow-x:auto">
+    <table><thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Joined</th></tr></thead><tbody id="userTable"></tbody></table>
+    </div>
+    <div id="userEmpty" class="empty" style="display:none">No users found.</div>
   </div>
   <div class="card">
-    <h3>All Products (<code>GET /api/v1/products</code>)</h3>
-    <pre id="products" style="background:#f5f5f5;padding:10px;border-radius:5px;overflow:auto;max-height:300px"></pre>
+    <h3>All Products</h3>
+    <div style="overflow-x:auto">
+    <table><thead><tr><th>Name</th><th>Description</th><th>Price</th><th>Stock</th><th>Added</th></tr></thead><tbody id="prodTable"></tbody></table>
+    </div>
+    <div id="prodEmpty" class="empty" style="display:none">No products yet. Sellers can add them from the seller dashboard.</div>
   </div>
+  <div style="text-align:center;margin-bottom:20px"><button class="action" onclick="loadStats()">Refresh</button></div>
 </div>
 <script>
-// Fix: same-origin API base (was hardcoded http://localhost:8080).
 const API=(typeof sriApiBase === "function") ? sriApiBase() : window.location.origin;
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 let token=localStorage.getItem('token');
 let user=JSON.parse(localStorage.getItem('user')||'null');
 if(!token||!user) window.location.href='/';
@@ -39,12 +60,45 @@ document.getElementById('userInfo').textContent=user.username+' ('+user.role+')'
 fetch(API+'/api/v1/auth/validate',{headers:{'Authorization':'Bearer '+token}}).then(r=>r.json()).then(d=>{
   if(d.error||d.role!=='admin'){ alert('Admin only'); window.location.href='/'; } else loadStats();
 });
+function shortDate(s){ return String(s||'').substring(0,10); }
 async function loadStats(){
   const r=await fetch(API+'/api/v1/admin/stats',{headers:{'Authorization':'Bearer '+token}});
   const d=await r.json();
   if(r.ok){ document.getElementById('userCount').textContent=d.userCount; document.getElementById('prodCount').textContent=d.productCount; }
-  const ru=await fetch(API+'/api/v1/auth/users',{headers:{'Authorization':'Bearer '+token}}); document.getElementById('users').textContent=JSON.stringify(await ru.json(),null,2);
-  const rp=await fetch(API+'/api/v1/products'); document.getElementById('products').textContent=JSON.stringify(await rp.json(),null,2);
+  // Users table
+  const ru=await fetch(API+'/api/v1/auth/users',{headers:{'Authorization':'Bearer '+token}});
+  const users=await ru.json();
+  const ut=document.getElementById('userTable'); ut.innerHTML='';
+  const list=Array.isArray(users)?users:[];
+  document.getElementById('userEmpty').style.display=list.length?'none':'block';
+  list.forEach(u=>{
+    const tr=document.createElement('tr');
+    const tdU=document.createElement('td'); tdU.textContent=u.username;
+    const tdE=document.createElement('td'); tdE.textContent=u.email;
+    const tdR=document.createElement('td');
+    const pill=document.createElement('span'); pill.className='role role-'+u.role; pill.textContent=u.role;
+    tdR.appendChild(pill);
+    const tdJ=document.createElement('td'); tdJ.textContent=shortDate(u.created_at);
+    tr.appendChild(tdU); tr.appendChild(tdE); tr.appendChild(tdR); tr.appendChild(tdJ);
+    ut.appendChild(tr);
+  });
+  // Products table
+  const rp=await fetch(API+'/api/v1/products');
+  const prods=await rp.json();
+  const pt=document.getElementById('prodTable'); pt.innerHTML='';
+  const plist=Array.isArray(prods)?prods:[];
+  document.getElementById('prodEmpty').style.display=plist.length?'none':'block';
+  plist.forEach(p=>{
+    const tr=document.createElement('tr');
+    const tdN=document.createElement('td'); tdN.textContent=p.name;
+    const tdD=document.createElement('td'); tdD.textContent=(p.description||'').substring(0,60);
+    const tdP=document.createElement('td'); tdP.textContent='₹'+Number(p.price).toFixed(2);
+    const tdS=document.createElement('td'); tdS.textContent=p.stock;
+    if(Number(p.stock)===0) tdS.className='stock-low';
+    const tdA=document.createElement('td'); tdA.textContent=shortDate(p.created_at);
+    tr.appendChild(tdN); tr.appendChild(tdD); tr.appendChild(tdP); tr.appendChild(tdS); tr.appendChild(tdA);
+    pt.appendChild(tr);
+  });
 }
 async function logout(){ await fetch(API+'/api/v1/auth/logout',{method:'POST',headers:{'Authorization':'Bearer '+token}}); localStorage.clear(); window.location.href='/';}
 </script>

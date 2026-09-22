@@ -24,13 +24,13 @@ table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px so
 </div>
 <div class="container">
   <div class="stats">
-    <div class="stat"><h3 id="prodCount">0</h3><div>Products (PostgreSQL lively)</div></div>
+    <div class="stat"><h3 id="prodCount">0</h3><div>Products in store</div></div>
     <div class="stat"><h3 id="sellerRole">-</h3><div>Your Role</div></div>
-    <div class="stat"><h3>Live DB</h3><div>Connected to <code>sri_mart:5433</code></div></div>
+    <div class="stat"><h3>Live</h3><div>Synced with the buyer app</div></div>
   </div>
 
   <div class="card">
-    <h3>Add / Create Product (dynamically to DB)</h3>
+    <h3>Add a new product</h3>
     <div class="form">
       <input id="pname" placeholder="Product name *">
       <input id="pdesc" placeholder="Description">
@@ -42,10 +42,10 @@ table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px so
   </div>
 
   <div class="card">
-    <h3>Your Products — Live from PostgreSQL (<code>GET /api/v1/products</code>)</h3>
-    <table><thead><tr><th>Name</th><th>Price</th><th>Stock</th><th>ID</th><th>Actions (Edit/Delete lively)</th></tr></thead><tbody id="prodTable"></tbody></table>
+    <h3>Your products</h3>
+    <table><thead><tr><th>Name</th><th>Price</th><th>Stock</th><th>ID</th><th>Actions</th></tr></thead><tbody id="prodTable"></tbody></table>
   </div>
-  <div style="font-size:12px;color:#666;text-align:center">Edit updates via <code>PUT /api/v1/products/{id}</code> and deletes via <code>DELETE</code> — all reflected instantly in PostgreSQL and buyer page.</div>
+  <div style="font-size:12px;color:#666;text-align:center">Edits appear instantly in the buyer app.</div>
 </div>
 <script>
 // Fix: same-origin API base (was hardcoded http://localhost:8080).
@@ -91,7 +91,7 @@ async function createProduct(){
     body: JSON.stringify({name, description, price, stock})
   });
   const d=await r.json();
-  if(r.ok){ showMsg('Product created lively in PostgreSQL','ok'); loadProducts(); document.getElementById('pname').value=''; document.getElementById('pprice').value=''; }
+  if(r.ok){ showMsg('Product created','ok'); loadProducts(); document.getElementById('pname').value=''; document.getElementById('pprice').value=''; }
   else showMsg(d.error||'Failed','err');
 }
 async function editProduct(id, oldName, oldPrice, oldStock, oldDesc){
@@ -104,10 +104,10 @@ async function editProduct(id, oldName, oldPrice, oldStock, oldDesc){
     body: JSON.stringify({name: name||oldName, price: isNaN(price)?oldPrice:price, stock: isNaN(stock)?oldStock:stock, description})
   });
   const d=await r.json();
-  if(r.ok){ showMsg('Updated lively','ok'); loadProducts(); } else showMsg(d.error||'Update failed','err');
+  if(r.ok){ showMsg('Updated','ok'); loadProducts(); } else showMsg(d.error||'Update failed','err');
 }
 async function deleteProduct(id){
-  if(!confirm('Delete this product lively from DB?')) return;
+  if(!confirm('Delete this product?')) return;
   const r=await fetch(API+'/api/v1/products/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+token}});
   const d=await r.json();
   if(r.ok){ showMsg('Deleted','ok'); loadProducts(); } else showMsg(d.error||'Delete failed','err');

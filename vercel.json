@@ -7,6 +7,8 @@
     { "source": "/seller", "destination": "/config/seller.html" },
     { "source": "/admin.html", "destination": "/config/admin.html" },
     { "source": "/admin", "destination": "/config/admin.html" },
+    { "source": "/order.html", "destination": "/config/order.html" },
+    { "source": "/order", "destination": "/config/order.html" },
     { "source": "/", "destination": "/config/login.html" }
   ]
 }

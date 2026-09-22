@@ -40,7 +40,7 @@
     <div style="margin-top:10px;font-weight:bold">Total: ₹<span id="cartTotal">0</span></div>
     <button onclick="checkout()" style="width:100%;margin-top:10px;padding:10px;background:#ff9800;color:white;border:none;border-radius:5px;cursor:pointer">Checkout / Billing</button>
     <div id="msg" class="msg"></div>
-    <div style="margin-top:10px;font-size:12px;color:#666">Lively connected to DB: products from PostgreSQL, cart live via <code>/api/v1/cart</code></div>
+    <div style="margin-top:10px;font-size:12px;color:#666">Fresh catalogue · Secure checkout · Easy 7-day returns</div>
     <hr style="margin:12px 0;border:none;border-top:1px solid #eee">
     <h3>My Orders</h3>
     <div id="orderList" style="font-size:13px;color:#888">Loading...</div>
@@ -132,9 +132,24 @@ async function removeFromCart(pid){
   viewCart();
 }
 async function checkout(){
+  // Snapshot item lines first (orders store totals; lines render the bill).
+  let snapItems=[];
+  try{
+    const cr=await fetch(API+'/api/v1/cart',{headers:{'Authorization':'Bearer '+token}});
+    const cart=await cr.json();
+    const pr=await fetch(API+'/api/v1/products'); const products=await pr.json();
+    const map={}; (products||[]).forEach(p=>map[p.id]=p);
+    (cart||[]).forEach(it=>{
+      const p=map[it.productId]||{name:'Item', price:0};
+      snapItems.push({name:p.name, price:p.price, qty:it.quantity});
+    });
+  }catch(e){}
   const r=await fetch(API+'/api/v1/orders/checkout',{method:'POST',headers:{'Authorization':'Bearer '+token}});
   const d=await r.json();
-  if(r.ok){ showMsg('Order placed! Total ₹'+d.total+' Bill ID '+d.id,'ok'); viewCart(); loadOrders(); }
+  if(r.ok){
+    try{ localStorage.setItem('sri_last_bill', JSON.stringify({id:d.id, items:snapItems})); }catch(e){}
+    window.location.href='/order?id='+encodeURIComponent(d.id);
+  }
   else showMsg(d.error||'Checkout failed','err');
 }
 async function viewReviews(productId){
@@ -239,6 +254,8 @@ function sendChat(){
   const t=inp.value.trim(); if(!t) return; inp.value=''; botAsk(t);
 }
 document.getElementById('chatInput').addEventListener('keypress',(e)=>{ if(e.key==='Enter') sendChat(); });
+// Deep link from the bill page ("Need Help?") opens the assistant directly.
+if(window.location.hash==='#chat' && !chatOpen){ toggleChat(); }
 async function logout(){
   await fetch(API+'/api/v1/auth/logout',{method:'POST',headers:{'Authorization':'Bearer '+token}});
   localStorage.removeItem('token'); localStorage.removeItem('user'); window.location.href='/';

@@ -158,6 +158,20 @@ int main()
         { serveHtml("config/admin.html", std::move(callback)); },
         {drogon::Get});
 
+    // Order success page — standalone bill shown after checkout.
+    drogon::app().registerHandler(
+        "/order",
+        [serveHtml](const drogon::HttpRequestPtr &req,
+           std::function<void(const drogon::HttpResponsePtr &)> &&callback)
+        { serveHtml("config/order.html", std::move(callback)); },
+        {drogon::Get});
+    drogon::app().registerHandler(
+        "/order.html",
+        [serveHtml](const drogon::HttpRequestPtr &req,
+           std::function<void(const drogon::HttpResponsePtr &)> &&callback)
+        { serveHtml("config/order.html", std::move(callback)); },
+        {drogon::Get});
+
     // Register all product-related routes (GET, POST, PUT, DELETE, search).
     ProductController::initRoutes();
 
