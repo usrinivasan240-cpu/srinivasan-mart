@@ -226,21 +226,6 @@ void AuthService::purgeExpiredTokens()
     }
 }
 
-// ---- login rate limiting (file-local): 5 fails / 10 min -> 5 min lock ----
-struct SriLoginAttempt
-{
-    int fails = 0;
-    std::chrono::steady_clock::time_point windowStart = std::chrono::steady_clock::now();
-    std::chrono::steady_clock::time_point lockUntil{};
-    bool locked = false;
-};
-
-static std::map<std::string, SriLoginAttempt> &sri_loginAttempts()
-{
-    static std::map<std::string, SriLoginAttempt> attempts;
-    return attempts;
-}
-
 // ---- input validation (file-local, no <regex> dependency) ----
 static bool sri_validUsername(const std::string &u)
 {
@@ -352,43 +337,19 @@ Json::Value AuthService::registerUser(const Json::Value &userData)
 
 // Logs in a user with username and password.
 // Returns a 24h token on success, or an error.
-// Rate limit: 5 failures per 10-min window locks the name for 5 min (429).
 Json::Value AuthService::loginUser(const std::string &username, const std::string &password)
 {
-    using clock = std::chrono::steady_clock;
     std::lock_guard<std::mutex> lock(getMutex());
-
-    auto now = clock::now();
-    auto &att = sri_loginAttempts()[username];
-    if (att.locked)
-    {
-        if (now < att.lockUntil)
-        {
-            auto waitSecs = std::chrono::duration_cast<std::chrono::seconds>(
-                att.lockUntil - now).count();
-            Json::Value error;
-            error["error"] = "Too many login attempts, try again later";
-            error["locked"] = true;
-            error["retry_after_seconds"] = static_cast<int>(waitSecs);
-            return error;
-        }
-        att = SriLoginAttempt(); // lock expired, reset
-    }
-    else if (now - att.windowStart > std::chrono::minutes(10))
-    {
-        att.fails = 0;
-        att.windowStart = now;
-    }
 
     for (auto &user : getUserStorage())
     {
         if (user.username == username && verifyPassword(user.password, password))
         {
-            sri_loginAttempts().erase(username);
             // Generate token with 24h expiry
             std::string token = generateToken();
             getTokenStorage()[token] = user.id;
-            getTokenExpiry()[token] = now + std::chrono::hours(kTokenTtlHours);
+            getTokenExpiry()[token] =
+                std::chrono::steady_clock::now() + std::chrono::hours(kTokenTtlHours);
 
             Json::Value result;
             result["token"] = token;
@@ -398,17 +359,6 @@ Json::Value AuthService::loginUser(const std::string &username, const std::strin
         }
     }
 
-    att.fails++;
-    if (att.fails >= 5)
-    {
-        att.locked = true;
-        att.lockUntil = now + std::chrono::minutes(5);
-        Json::Value error;
-        error["error"] = "Too many login attempts, try again in 5 minutes";
-        error["locked"] = true;
-        error["retry_after_seconds"] = 300;
-        return error;
-    }
     Json::Value error;
     error["error"] = "Invalid username or password";
     return error;

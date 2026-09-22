@@ -98,8 +98,7 @@ void AuthController::loginUser(
     if (result.isMember("error"))
     {
         auto resp = HttpResponse::newHttpJsonResponse(result);
-        // Brute-force lockout returns 429 so clients can back off.
-        resp->setStatusCode(result.isMember("locked") ? k429TooManyRequests : k401Unauthorized);
+        resp->setStatusCode(k401Unauthorized);
         callback(resp);
     }
     else
