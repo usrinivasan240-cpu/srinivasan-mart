@@ -12,8 +12,14 @@ A C++20 backend API for an e-commerce store, built with Drogon and PostgreSQL. H
 
 ## Features
 
-- User registration, login with token auth, token validation
+- User registration, login with token auth (24h expiry), token validation
 - Product CRUD (create, list, get by id, update, delete) persisted in PostgreSQL
+- Cart, transactional checkout, order history + status flow
+- Reviews and ratings per product; seller/admin dashboards and stats
+- **Sri Assistant chatbot** (`POST /api/v1/chat`): greetings, catalog search
+  with product cards, prices, stock, deals, order tracking, cart summary,
+  hours/delivery/returns, and account help — with quick-reply suggestions.
+  Buyer page has a floating chat widget; My Orders panel included.
 - Health check and hello test endpoints
 - Login/Register web UI with token storage in localStorage
 
