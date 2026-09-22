@@ -41,12 +41,18 @@ public:
     // Returns user_id for a token, or empty string if invalid.
     static std::string getUserIdFromToken(const std::string &token);
 
+    // Returns role ("admin"/"seller"/"customer") for a token, or "" if invalid.
+    static std::string getRoleFromToken(const std::string &token);
+
 private:
     // Generates a unique ID (UUID).
     static std::string generateUUID();
 
-    // Simple password hashing (for demo; use bcrypt in production).
+    // Salted password hashing (SHA-256 via OpenSSL when available).
+    // Stored format: "salt$hex". Verifies both new format and legacy XOR.
     static std::string hashPassword(const std::string &password);
+    static bool verifyPassword(const std::string &stored, const std::string &plain);
+    static std::string currentTimestamp();
 
     // Generates an authentication token.
     static std::string generateToken();

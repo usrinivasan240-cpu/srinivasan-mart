@@ -140,11 +140,33 @@ void AuthController::validateToken(
     }
 }
 
-// Returns all registered users (without passwords).
+// Returns all registered users (without passwords). Admin-only fix:
+// previously public, enabling user enumeration.
 void AuthController::getUsers(
     const HttpRequestPtr &req,
     std::function<void(const HttpResponsePtr &)> &&callback)
 {
+    std::string h = req->getHeader("Authorization");
+    std::string token = (h.empty() || h.find("Bearer ") != 0) ? "" : h.substr(7);
+    if (token.empty() || AuthService::getRoleFromToken(token) != "admin")
+    {
+        Json::Value error;
+        if (token.empty())
+        {
+            error["error"] = "Authorization header with Bearer token required";
+            auto resp = HttpResponse::newHttpJsonResponse(error);
+            resp->setStatusCode(k401Unauthorized);
+            callback(resp);
+        }
+        else
+        {
+            error["error"] = "Admin only";
+            auto resp = HttpResponse::newHttpJsonResponse(error);
+            resp->setStatusCode(k403Forbidden);
+            callback(resp);
+        }
+        return;
+    }
     auto users = AuthService::getAllUsers();
     auto resp = HttpResponse::newHttpJsonResponse(users);
     callback(resp);

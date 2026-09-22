@@ -102,5 +102,9 @@ Default accounts: `admin / admin123 (admin)`, `customer / customer123 (customer)
 
 ## Notes
 - Products are persisted in PostgreSQL `products` table (auto-created on startup).
-- Auth storage is currently in-memory; moving to PostgreSQL + hashed passwords with bcrypt is planned.
+- Auth storage is in-memory with salted SHA-256 password hashes (`salt$hex`, 10k rounds via OpenSSL when available, legacy XOR accounts still verify). PostgreSQL + bcrypt migration is the next step.
+- DB connection reads `PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD` env vars (see `.env.example`); HTTP port reads `PORT` (default 8080).
+- `POST/PUT/DELETE /api/v1/products` require seller/admin Bearer token; `GET /api/v1/auth/users` is admin-only; self-register can only create `customer`/`seller` (never `admin`).
+- `GET /api/v1/products` and `/products/search` support `?limit=&offset=` (search is case-insensitive `ILIKE` in SQL); checkout runs in a Postgres transaction and decrements stock atomically.
+- Frontend uses same-origin API (`window.location.origin`) + auth headers on seller writes + HTML escaping.
 - See `ARCHITECTURE.md` for layer details and `config/drogon.json` for port/log config.

@@ -16,13 +16,22 @@
 #include "controllers/AdminController.h"
 #include "controllers/ChatController.h"
 #include "services/ProductService.h"
+#include <cstdlib>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 
 int main()
 {
-    // Start the server and listen for HTTP requests on port 8080.
-    drogon::app().addListener("0.0.0.0", 8080);
+    // Port is configurable via PORT env var (default 8080) for deploy parity.
+    int port = 8080;
+    if (const char *envPort = std::getenv("PORT"))
+    {
+        try { int p = std::stoi(envPort); if (p > 0 && p < 65536) port = p; }
+        catch (...) { /* keep default */ }
+    }
+    // Start the server and listen for HTTP requests.
+    drogon::app().addListener("0.0.0.0", static_cast<uint16_t>(port));
 
     // Health check endpoint: tells us if the server is alive.
     drogon::app().registerHandler(
@@ -134,8 +143,8 @@ int main()
     ProductService::initializeDatabase();
 
     // Keep the server running and handle requests.
-    std::cout << "Sri Mart API running on http://0.0.0.0:8080" << std::endl;
-    std::cout << "Login page: http://localhost:8080/" << std::endl;
+    std::cout << "Sri Mart API running on http://0.0.0.0:" << port << std::endl;
+    std::cout << "Login page: http://localhost:" << port << "/" << std::endl;
     drogon::app().run();
 
     return 0;

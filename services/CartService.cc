@@ -41,10 +41,10 @@ Json::Value CartService::getCart(const std::string &userId)
 
 Json::Value CartService::addItem(const std::string &userId, const std::string &productId, int quantity)
 {
-    if (quantity <= 0)
+    if (quantity <= 0 || quantity > 99)
     {
         Json::Value error;
-        error["error"] = "Quantity must be >= 1";
+        error["error"] = "Quantity must be 1-99";
         return error;
     }
     // Validate product exists via Postgres-backed service.
@@ -55,6 +55,7 @@ Json::Value CartService::addItem(const std::string &userId, const std::string &p
         error["error"] = "Product not found";
         return error;
     }
+    int stock = product.get("stock", 0).asInt();
 
     std::lock_guard<std::mutex> lock(getMutex());
     auto &items = getStorage()[userId];
@@ -62,9 +63,28 @@ Json::Value CartService::addItem(const std::string &userId, const std::string &p
     {
         if (item.productId == productId)
         {
-            item.quantity += quantity;
+            int merged = item.quantity + quantity;
+            if (merged > 99)
+            {
+                Json::Value error;
+                error["error"] = "Cart line capped at 99 units";
+                return error;
+            }
+            if (merged > stock)
+            {
+                Json::Value error;
+                error["error"] = "Insufficient stock (only " + std::to_string(stock) + " available)";
+                return error;
+            }
+            item.quantity = merged;
             return item.toJson();
         }
+    }
+    if (quantity > stock)
+    {
+        Json::Value error;
+        error["error"] = "Insufficient stock (only " + std::to_string(stock) + " available)";
+        return error;
     }
     CartItem item;
     item.userId = userId;

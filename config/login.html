@@ -84,7 +84,8 @@
     </div>
 
     <script>
-        const API_BASE = 'http://localhost:8080';
+        // Fix: use same-origin instead of hardcoded localhost:8080 (deploy-safe).
+        const API_BASE = window.location.origin;
 
         function showForm(type) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));

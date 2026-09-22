@@ -47,7 +47,9 @@ table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px so
   <div style="font-size:12px;color:#666;text-align:center">Edit updates via <code>PUT /api/v1/products/{id}</code> and deletes via <code>DELETE</code> — all reflected instantly in PostgreSQL and buyer page.</div>
 </div>
 <script>
-const API='http://localhost:8080';
+// Fix: same-origin API base (was hardcoded http://localhost:8080).
+const API=window.location.origin;
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 let token=localStorage.getItem('token');
 let user=JSON.parse(localStorage.getItem('user')||'null');
 if(!token || !user){ window.location.href='/'; }
@@ -67,9 +69,13 @@ async function loadProducts(){
   document.getElementById('prodCount').textContent=data.length;
   data.forEach(p=>{
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${p.name}</td><td>₹${p.price}</td><td>${p.stock}</td><td style="font-size:10px">${p.id.substring(0,8)}</td>
-    <td><button class="btn-edit" onclick="editProduct('${p.id}','${p.name.replace(/'/g,"\\'")}',${p.price},${p.stock},'${(p.description||'').replace(/'/g,"\\'")}')">Edit</button>
-    <button class="btn-del" onclick="deleteProduct('${p.id}')">Delete</button></td>`;
+    const rowId = 'row-' + p.id.replace(/[^a-zA-Z0-9_-]/g,'');
+    tr.id = rowId;
+    tr.innerHTML=`<td>${escapeHtml(p.name)}</td><td>₹${escapeHtml(p.price)}</td><td>${escapeHtml(p.stock)}</td><td style="font-size:10px">${escapeHtml(p.id.substring(0,8))}</td>
+    <td><button class="btn-edit">Edit</button>
+    <button class="btn-del">Delete</button></td>`;
+    tr.querySelector('.btn-edit').addEventListener('click', () => editProduct(p.id, p.name, p.price, p.stock, p.description||''));
+    tr.querySelector('.btn-del').addEventListener('click', () => deleteProduct(p.id));
     tbody.appendChild(tr);
   });
 }
@@ -80,7 +86,7 @@ async function createProduct(){
   const stock=parseInt(document.getElementById('pstock').value||'0');
   if(!name||!price){ showMsg('Name and price required','err'); return; }
   const r=await fetch(API+'/api/v1/products',{
-    method:'POST', headers:{'Content-Type':'application/json'},
+    method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
     body: JSON.stringify({name, description, price, stock})
   });
   const d=await r.json();
@@ -93,7 +99,7 @@ async function editProduct(id, oldName, oldPrice, oldStock, oldDesc){
   const stock=parseInt(prompt('Edit stock:', oldStock));
   const description=prompt('Edit description:', oldDesc)||'';
   const r=await fetch(API+'/api/v1/products/'+id,{
-    method:'PUT', headers:{'Content-Type':'application/json'},
+    method:'PUT', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
     body: JSON.stringify({name: name||oldName, price: isNaN(price)?oldPrice:price, stock: isNaN(stock)?oldStock:stock, description})
   });
   const d=await r.json();
@@ -101,7 +107,7 @@ async function editProduct(id, oldName, oldPrice, oldStock, oldDesc){
 }
 async function deleteProduct(id){
   if(!confirm('Delete this product lively from DB?')) return;
-  const r=await fetch(API+'/api/v1/products/'+id,{method:'DELETE'});
+  const r=await fetch(API+'/api/v1/products/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+token}});
   const d=await r.json();
   if(r.ok){ showMsg('Deleted','ok'); loadProducts(); } else showMsg(d.error||'Delete failed','err');
 }

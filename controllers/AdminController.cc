@@ -36,10 +36,9 @@ void AdminController::sellerStats(const HttpRequestPtr &req,
         resp->setStatusCode(k401Unauthorized); callback(resp); return;
     }
     // Stub: any logged user sees total products; per-seller ownership planned.
-    auto products = ProductService::getAllProducts();
     Json::Value ok;
     ok["role"] = user.get("role", "customer").asString();
-    ok["productCount"] = (int)products.size();
+    ok["productCount"] = ProductService::countProducts();
     ok["note"] = "Seller ownership filter planned";
     auto resp = HttpResponse::newHttpJsonResponse(ok);
     callback(resp);
@@ -62,10 +61,9 @@ void AdminController::adminStats(const HttpRequestPtr &req,
         resp->setStatusCode(k403Forbidden); callback(resp); return;
     }
     auto users = AuthService::getAllUsers();
-    auto products = ProductService::getAllProducts();
     Json::Value ok;
     ok["userCount"] = (int)users.size();
-    ok["productCount"] = (int)products.size();
+    ok["productCount"] = ProductService::countProducts();
     auto resp = HttpResponse::newHttpJsonResponse(ok);
     callback(resp);
 }

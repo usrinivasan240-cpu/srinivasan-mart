@@ -43,7 +43,9 @@
   </div>
 </div>
 <script>
-const API='http://localhost:8080';
+// Fix: same-origin API base (was hardcoded http://localhost:8080).
+const API=window.location.origin;
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 let token=localStorage.getItem('token');
 let user=JSON.parse(localStorage.getItem('user')||'null');
 if(!token || !user){ window.location.href='/'; }
@@ -73,7 +75,7 @@ function renderProducts(list){
   if(!list || list.length===0){ c.innerHTML='<p style="color:#666">No products found. Seller needs to add.</p>'; return; }
   list.forEach(p=>{
     const div=document.createElement('div'); div.className='card';
-    div.innerHTML=`<h3>${p.name}</h3><div style="font-size:13px;color:#666">${p.description||''}</div><div class="price">₹${p.price}</div><div style="font-size:12px">Stock: ${p.stock}</div>
+    div.innerHTML=`<h3>${escapeHtml(p.name)}</h3><div style="font-size:13px;color:#666">${escapeHtml(p.description||'')}</div><div class="price">₹${escapeHtml(p.price)}</div><div style="font-size:12px">Stock: ${escapeHtml(p.stock)}</div>
     <button onclick="addToCart('${p.id}')">Add to Cart</button>
     <button onclick="viewReviews('${p.id}')" style="background:#2196F3">Reviews</button>`;
     c.appendChild(div);
@@ -102,7 +104,8 @@ async function viewCart(){
       const lineTotal = (p.price||0)*item.quantity;
       total+=lineTotal; count+=item.quantity;
       const d=document.createElement('div'); d.className='cart-item';
-      d.innerHTML=`<span>${p.name} x${item.quantity}</span><span>₹${lineTotal.toFixed(2)} <a href="#" onclick="removeFromCart('${item.productId}');return false" style="color:red">x</a></span>`;
+      const safeName = escapeHtml(p.name);
+      d.innerHTML=`<span>${safeName} x${item.quantity}</span><span>₹${lineTotal.toFixed(2)} <a href="#" onclick="removeFromCart('${item.productId}');return false" style="color:red">x</a></span>`;
       el.appendChild(d);
     });
   }

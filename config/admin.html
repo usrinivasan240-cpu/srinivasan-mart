@@ -29,7 +29,8 @@ button{padding:8px 16px;border:none;border-radius:5px;cursor:pointer;background:
   </div>
 </div>
 <script>
-const API='http://localhost:8080';
+// Fix: same-origin API base (was hardcoded http://localhost:8080).
+const API=window.location.origin;
 let token=localStorage.getItem('token');
 let user=JSON.parse(localStorage.getItem('user')||'null');
 if(!token||!user) window.location.href='/';
@@ -41,7 +42,7 @@ async function loadStats(){
   const r=await fetch(API+'/api/v1/admin/stats',{headers:{'Authorization':'Bearer '+token}});
   const d=await r.json();
   if(r.ok){ document.getElementById('userCount').textContent=d.userCount; document.getElementById('prodCount').textContent=d.productCount; }
-  const ru=await fetch(API+'/api/v1/auth/users'); document.getElementById('users').textContent=JSON.stringify(await ru.json(),null,2);
+  const ru=await fetch(API+'/api/v1/auth/users',{headers:{'Authorization':'Bearer '+token}}); document.getElementById('users').textContent=JSON.stringify(await ru.json(),null,2);
   const rp=await fetch(API+'/api/v1/products'); document.getElementById('products').textContent=JSON.stringify(await rp.json(),null,2);
 }
 async function logout(){ await fetch(API+'/api/v1/auth/logout',{method:'POST',headers:{'Authorization':'Bearer '+token}}); localStorage.clear(); window.location.href='/';}

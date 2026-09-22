@@ -11,9 +11,30 @@
 #include <random>
 #include <sstream>
 #include <iostream>
+#include <cstdlib>
 
 // The PostgreSQL connection (shared across all operations).
 static PGconn *g_conn = nullptr;
+
+// Builds a libpq conninfo string from env vars with safe defaults.
+// PGHOST (localhost), PGPORT (5433), PGDATABASE (sri_mart),
+// PGUSER (postgres), PGPASSWORD (postgres).
+static std::string sri_conninfo()
+{
+    const char *host = std::getenv("PGHOST");
+    const char *port = std::getenv("PGPORT");
+    const char *dbname = std::getenv("PGDATABASE");
+    const char *user = std::getenv("PGUSER");
+    const char *password = std::getenv("PGPASSWORD");
+    std::ostringstream oss;
+    oss << "host=" << (host && *host ? host : "localhost")
+        << " port=" << (port && *port ? port : "5433")
+        << " dbname=" << (dbname && *dbname ? dbname : "sri_mart")
+        << " user=" << (user && *user ? user : "postgres")
+        << " password=" << (password ? password : "postgres")
+        << " connect_timeout=5";
+    return oss.str();
+}
 
 // Returns the PostgreSQL connection.
 // Creates a new connection if one doesn't exist.
@@ -25,8 +46,8 @@ PGconn *ProductService::getConnection()
         {
             PQfinish(g_conn);
         }
-        // Connect to PostgreSQL on localhost:5433, database sri_mart, user postgres
-        g_conn = PQconnectdb("host=localhost port=5433 dbname=sri_mart user=postgres password=postgres");
+        std::string conninfo = sri_conninfo();
+        g_conn = PQconnectdb(conninfo.c_str());
         if (PQstatus(g_conn) != CONNECTION_OK)
         {
             LOG_ERROR << "PostgreSQL connection failed: " << PQerrorMessage(g_conn);
@@ -105,9 +126,12 @@ bool ProductService::initializeDatabase()
     return true;
 }
 
-// Returns all products from the PostgreSQL database.
-Json::Value ProductService::getAllProducts()
+// Returns products from PostgreSQL with LIMIT/OFFSET pagination.
+Json::Value ProductService::getAllProducts(int limit, int offset)
 {
+    if (limit <= 0) limit = 100;
+    if (limit > 500) limit = 500;
+    if (offset < 0) offset = 0;
     Json::Value result(Json::arrayValue);
     PGconn *conn = getConnection();
     if (conn == nullptr)
@@ -115,9 +139,14 @@ Json::Value ProductService::getAllProducts()
         return result;
     }
 
-    PGresult *res = PQexec(conn,
+    std::string lim = std::to_string(limit);
+    std::string off = std::to_string(offset);
+    const char *params[2] = {lim.c_str(), off.c_str()};
+    PGresult *res = PQexecParams(conn,
         "SELECT id, name, description, price, stock, "
-        "created_at::text, updated_at::text FROM products");
+        "created_at::text, updated_at::text FROM products "
+        "ORDER BY created_at DESC LIMIT $1::integer OFFSET $2::integer",
+        2, nullptr, params, nullptr, nullptr, 0);
 
     if (PQresultStatus(res) != PGRES_TUPLES_OK)
     {
@@ -135,8 +164,10 @@ Json::Value ProductService::getAllProducts()
         item["id"] = PQgetvalue(res, i, 0);
         item["name"] = PQgetvalue(res, i, 1);
         item["description"] = PQgetvalue(res, i, 2);
-        item["price"] = std::stod(PQgetvalue(res, i, 3));
-        item["stock"] = std::stoi(PQgetvalue(res, i, 4));
+        try { item["price"] = std::stod(PQgetvalue(res, i, 3)); }
+        catch (...) { item["price"] = 0.0; }
+        try { item["stock"] = std::stoi(PQgetvalue(res, i, 4)); }
+        catch (...) { item["stock"] = 0; }
         item["created_at"] = PQgetvalue(res, i, 5);
         item["updated_at"] = PQgetvalue(res, i, 6);
         result.append(item);
@@ -182,8 +213,10 @@ Json::Value ProductService::getProductById(const std::string &id)
         item["id"] = PQgetvalue(res, 0, 0);
         item["name"] = PQgetvalue(res, 0, 1);
         item["description"] = PQgetvalue(res, 0, 2);
-        item["price"] = std::stod(PQgetvalue(res, 0, 3));
-        item["stock"] = std::stoi(PQgetvalue(res, 0, 4));
+        try { item["price"] = std::stod(PQgetvalue(res, 0, 3)); }
+        catch (...) { item["price"] = 0.0; }
+        try { item["stock"] = std::stoi(PQgetvalue(res, 0, 4)); }
+        catch (...) { item["stock"] = 0; }
         item["created_at"] = PQgetvalue(res, 0, 5);
         item["updated_at"] = PQgetvalue(res, 0, 6);
         freeResult(res);
@@ -205,11 +238,32 @@ Json::Value ProductService::createProduct(const Json::Value &productData)
         return error;
     }
 
+    std::string name = productData.get("name", "").asString();
+    if (name.empty() || name.size() > 255)
+    {
+        Json::Value error;
+        error["error"] = "Name is required (max 255 chars)";
+        return error;
+    }
+    double priceVal = productData.get("price", -1.0).asDouble();
+    int stockVal = productData.get("stock", 0).asInt();
+    if (priceVal < 0 || priceVal > 100000000)
+    {
+        Json::Value error;
+        error["error"] = "Price must be >= 0";
+        return error;
+    }
+    if (stockVal < 0 || stockVal > 1000000)
+    {
+        Json::Value error;
+        error["error"] = "Stock must be >= 0";
+        return error;
+    }
+
     std::string id = generateUUID();
-    std::string name = productData["name"].asString();
     std::string description = productData.get("description", "").asString();
-    std::string price = std::to_string(productData["price"].asDouble());
-    std::string stock = std::to_string(productData.get("stock", 0).asInt());
+    std::string price = std::to_string(priceVal);
+    std::string stock = std::to_string(stockVal);
 
     const char *paramValues[5] = {id.c_str(), name.c_str(), description.c_str(), price.c_str(), stock.c_str()};
 
@@ -240,24 +294,35 @@ Json::Value ProductService::updateProduct(const std::string &id, const Json::Val
         return Json::Value();
     }
 
-    // Check if product exists
-    const char *checkParams[1] = {id.c_str()};
-    PGresult *checkRes = PQexecParams(conn,
-        "SELECT id FROM products WHERE id = $1",
-        1, nullptr, checkParams, nullptr, nullptr, 0);
-
-    if (PQresultStatus(checkRes) != PGRES_TUPLES_OK || PQntuples(checkRes) == 0)
+    // Merge semantics fix: previously missing fields overwrote with ""/0.
+    // Fetch existing first, keep old values when fields are absent.
+    Json::Value existing = getProductById(id);
+    if (existing.isNull())
     {
-        freeResult(checkRes);
         return Json::Value();
     }
-    freeResult(checkRes);
-
-    // Update the product
-    std::string name = productData.get("name", "").asString();
-    std::string description = productData.get("description", "").asString();
-    std::string price = std::to_string(productData.get("price", 0.0).asDouble());
-    std::string stock = std::to_string(productData.get("stock", 0).asInt());
+    std::string name = productData.isMember("name") && !productData["name"].asString().empty()
+        ? productData["name"].asString() : existing.get("name", "").asString();
+    std::string description = productData.isMember("description")
+        ? productData["description"].asString() : existing.get("description", "").asString();
+    double priceVal = productData.isMember("price")
+        ? productData["price"].asDouble() : existing.get("price", 0.0).asDouble();
+    int stockVal = productData.isMember("stock")
+        ? productData["stock"].asInt() : existing.get("stock", 0).asInt();
+    if (name.empty() || name.size() > 255)
+    {
+        Json::Value error;
+        error["error"] = "Name is required (max 255 chars)";
+        return error;
+    }
+    if (priceVal < 0 || stockVal < 0)
+    {
+        Json::Value error;
+        error["error"] = "Price and stock must be >= 0";
+        return error;
+    }
+    std::string price = std::to_string(priceVal);
+    std::string stock = std::to_string(stockVal);
 
     const char *paramValues[5] = {name.c_str(), description.c_str(), price.c_str(), stock.c_str(), id.c_str()};
 
@@ -304,29 +369,101 @@ bool ProductService::deleteProduct(const std::string &id)
     return deleted;
 }
 
-// Searches products by case-sensitive name substring + price range.
-// Stub: loads all then filters in RAM (Week 5). Planned: SQL WHERE ILIKE.
-Json::Value ProductService::searchProducts(const std::string &query, double minPrice, double maxPrice)
+// Case-insensitive SQL search: ILIKE + price range + pagination.
+// minPrice/maxPrice < 0 means "no bound".
+Json::Value ProductService::searchProducts(const std::string &query, double minPrice, double maxPrice,
+                                           int limit, int offset)
 {
-    Json::Value all = getAllProducts();
+    if (limit <= 0) limit = 100;
+    if (limit > 500) limit = 500;
+    if (offset < 0) offset = 0;
     Json::Value result(Json::arrayValue);
-    for (auto &item : all)
+    PGconn *conn = getConnection();
+    if (conn == nullptr) return result;
+
+    std::string q = query.size() > 200 ? query.substr(0, 200) : query;
+    std::string minS = std::to_string(minPrice);
+    std::string maxS = std::to_string(maxPrice);
+    std::string limS = std::to_string(limit);
+    std::string offS = std::to_string(offset);
+    const char *params[5] = {q.c_str(), minS.c_str(), maxS.c_str(), limS.c_str(), offS.c_str()};
+    PGresult *res = PQexecParams(conn,
+        "SELECT id, name, description, price, stock, "
+        "created_at::text, updated_at::text FROM products "
+        "WHERE ($1 = '' OR name ILIKE '%' || $1 || '%') "
+        "AND ($2::double precision < 0 OR price >= $2::decimal) "
+        "AND ($3::double precision < 0 OR price <= $3::decimal) "
+        "ORDER BY created_at DESC LIMIT $4::integer OFFSET $5::integer",
+        5, nullptr, params, nullptr, nullptr, 0);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK)
     {
-        std::string name = item.get("name", "").asString();
-        double price = item.get("price", 0.0).asDouble();
-        if (!query.empty() && name.find(query) == std::string::npos)
-        {
-            continue;
-        }
-        if (minPrice >= 0 && price < minPrice)
-        {
-            continue;
-        }
-        if (maxPrice >= 0 && price > maxPrice)
-        {
-            continue;
-        }
+        LOG_ERROR << "Search products failed: " << PQerrorMessage(conn);
+        freeResult(res);
+        return result;
+    }
+    int rows = PQntuples(res);
+    for (int i = 0; i < rows; i++)
+    {
+        Json::Value item;
+        item["id"] = PQgetvalue(res, i, 0);
+        item["name"] = PQgetvalue(res, i, 1);
+        item["description"] = PQgetvalue(res, i, 2);
+        try { item["price"] = std::stod(PQgetvalue(res, i, 3)); }
+        catch (...) { item["price"] = 0.0; }
+        try { item["stock"] = std::stoi(PQgetvalue(res, i, 4)); }
+        catch (...) { item["stock"] = 0; }
+        item["created_at"] = PQgetvalue(res, i, 5);
+        item["updated_at"] = PQgetvalue(res, i, 6);
         result.append(item);
     }
+    freeResult(res);
     return result;
+}
+
+// Returns SELECT COUNT(*) for stats endpoints.
+int ProductService::countProducts()
+{
+    PGconn *conn = getConnection();
+    if (conn == nullptr) return 0;
+    PGresult *res = PQexec(conn, "SELECT COUNT(*) FROM products");
+    if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0)
+    {
+        freeResult(res);
+        return 0;
+    }
+    int count = 0;
+    try { count = std::stoi(PQgetvalue(res, 0, 0)); } catch (...) { count = 0; }
+    freeResult(res);
+    return count;
+}
+
+// Atomically decrements stock when sufficient. Safe to call inside a
+// caller-managed transaction (checkout) or standalone.
+bool ProductService::decrementStock(const std::string &id, int qty, std::string &err)
+{
+    if (qty <= 0) { err = "Quantity must be >= 1"; return false; }
+    PGconn *conn = getConnection();
+    if (conn == nullptr) { err = "Database connection failed"; return false; }
+    const char *params[2] = {id.c_str(), std::to_string(qty).c_str()};
+    // Single-statement atomic guard: only decrements when stock >= qty.
+    PGresult *res = PQexecParams(conn,
+        "UPDATE products SET stock = stock - $2::integer, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = $1 AND stock >= $2::integer",
+        2, nullptr, params, nullptr, nullptr, 0);
+    if (PQresultStatus(res) != PGRES_COMMAND_OK)
+    {
+        err = std::string("Stock update failed: ") + PQerrorMessage(conn);
+        freeResult(res);
+        return false;
+    }
+    std::string tuples = PQcmdTuples(res);
+    freeResult(res);
+    if (tuples.empty() || tuples == "0")
+    {
+        // Distinguish missing product vs insufficient stock.
+        Json::Value p = getProductById(id);
+        err = p.isNull() ? "Product not found" : "Insufficient stock";
+        return false;
+    }
+    return true;
 }
