@@ -9,7 +9,7 @@
 //   3. window.location.origin (local dev: C++ server serves these pages itself)
 // ============================================================
 
-window.SRI_API_BASE = ""; // e.g. "https://srinivasan-mart-api.onrender.com"
+window.SRI_API_BASE = "https://srinivasan-mart.onrender.com";
 
 function sriApiBase() {
   try {
